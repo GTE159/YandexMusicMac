@@ -60,10 +60,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             window.title = ""
             window.titleVisibility = .hidden
             window.titlebarAppearsTransparent = true
-            window.appearance = NSAppearance(named: .darkAqua)
-            window.backgroundColor = NSColor(red: 11 / 255, green: 11 / 255, blue: 13 / 255, alpha: 1.0)
+            window.minSize = NSSize(width: 440, height: 320)
             window.toolbar = nil
             window.isMovableByWindowBackground = true
+            YMThemeManager.shared.updateWindowAppearance()
             WindowState.shared.update(from: window)
         }
     }
@@ -81,6 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 struct YandexMusicMacApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @UIState private var authService = AuthService.shared
+    @UIState private var themeManager = YMThemeManager.shared
 
     init() {
         _ = RemoteCommandManager.shared
@@ -95,9 +96,9 @@ struct YandexMusicMacApp: App {
                     LoginView()
                 }
             }
-            .preferredColorScheme(.dark)
+            .preferredColorScheme(themeManager.currentTheme.colorScheme)
             .tint(YMTheme.accent)
-            .frame(minWidth: 880, minHeight: 560)
+            .frame(minWidth: 440, minHeight: 320)
             .onAppear {
                 appDelegate.configureMainWindowIfNeeded()
             }
@@ -116,7 +117,7 @@ struct YandexMusicMacApp: App {
                 Button(AudioPlayerEngine.shared.isPlaying ? "Пауза" : "Воспроизведение") {
                     AudioPlayerEngine.shared.togglePlayPause()
                 }
-                .keyboardShortcut("p", modifiers: [.command])
+                .keyboardShortcut(.space, modifiers: [])
 
                 Button("Следующий трек") {
                     AudioPlayerEngine.shared.next()
@@ -127,6 +128,25 @@ struct YandexMusicMacApp: App {
                     AudioPlayerEngine.shared.previous()
                 }
                 .keyboardShortcut(.leftArrow, modifiers: [.command])
+
+                Divider()
+
+                Button("Увеличить громкость") {
+                    AudioPlayerEngine.shared.volume = min(1.0, AudioPlayerEngine.shared.volume + 0.1)
+                }
+                .keyboardShortcut(.upArrow, modifiers: [.command])
+
+                Button("Уменьшить громкость") {
+                    AudioPlayerEngine.shared.volume = max(0.0, AudioPlayerEngine.shared.volume - 0.1)
+                }
+                .keyboardShortcut(.downArrow, modifiers: [.command])
+
+                Button("Мне нравится / Удалить из избранного") {
+                    if let track = AudioPlayerEngine.shared.currentTrack {
+                        Task { await LikesService.shared.toggleLike(track: track) }
+                    }
+                }
+                .keyboardShortcut("l", modifiers: [.command])
 
                 Divider()
 
@@ -159,6 +179,38 @@ struct YandexMusicMacApp: App {
                         }
                     }
                 }
+            }
+
+            CommandMenu("Навигация") {
+                Button("Поиск") {
+                    NavigationCoordinator.shared.selectSection(.search)
+                }
+                .keyboardShortcut("f", modifiers: [.command])
+
+                Button("Моя волна") {
+                    NavigationCoordinator.shared.selectSection(.myWave)
+                }
+                .keyboardShortcut("1", modifiers: [.command])
+
+                Button("Чарт") {
+                    NavigationCoordinator.shared.selectSection(.chart)
+                }
+                .keyboardShortcut("2", modifiers: [.command])
+
+                Button("Мне нравится") {
+                    NavigationCoordinator.shared.selectSection(.favorites)
+                }
+                .keyboardShortcut("3", modifiers: [.command])
+
+                Button("Плейлисты") {
+                    NavigationCoordinator.shared.selectSection(.playlists)
+                }
+                .keyboardShortcut("4", modifiers: [.command])
+
+                Button("Настройки") {
+                    NavigationCoordinator.shared.selectSection(.settings)
+                }
+                .keyboardShortcut(",", modifiers: [.command])
             }
 
             CommandMenu("Память") {

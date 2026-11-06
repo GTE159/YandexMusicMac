@@ -615,12 +615,15 @@ public struct MyWaveView: View {
     }
 
     private func showToast(_ message: String) {
-        toastMessage = message
         toastDismissTask?.cancel()
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+            toastMessage = message
+        }
         toastDismissTask = Task {
-            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            try? await Task.sleep(nanoseconds: 4_500_000_000)
+            guard !Task.isCancelled else { return }
             await MainActor.run {
-                withAnimation {
+                withAnimation(.easeInOut(duration: 0.4)) {
                     self.toastMessage = nil
                 }
             }

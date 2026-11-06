@@ -18,19 +18,19 @@ public struct PlayerBarView: View {
         HStack(spacing: 0) {
             // Left: Track cover, Title, Artist, Like
             leftTrackSection
-                .frame(minWidth: 160, maxWidth: 250, alignment: .leading)
+                .frame(minWidth: windowState.isMiniWidth ? 110 : 160, maxWidth: 250, alignment: .leading)
 
-            Spacer(minLength: 8)
+            Spacer(minLength: 6)
 
             // Center: Symmetrical Playback Controls & Progress Scrubber
             centerControlsSection
-                .frame(minWidth: 280, maxWidth: 440)
+                .frame(minWidth: windowState.isMiniWidth ? 160 : 280, maxWidth: 440)
 
-            Spacer(minLength: 8)
+            Spacer(minLength: 6)
 
             // Right: Lyrics, Fixed-width Quality Badge & Volume Control
             rightControlsSection
-                .frame(minWidth: 160, maxWidth: 250, alignment: .trailing)
+                .frame(minWidth: windowState.isMiniWidth ? 80 : 160, maxWidth: 250, alignment: .trailing)
         }
         .padding(.horizontal, windowState.isCompactWidth ? 12 : 20)
         .padding(.vertical, 8)
@@ -139,21 +139,23 @@ public struct PlayerBarView: View {
     private var centerControlsSection: some View {
         VStack(spacing: 6) {
             // Row 1: Symmetrical Playback Controls
-            HStack(spacing: 16) {
+            HStack(spacing: windowState.isMiniWidth ? 10 : 16) {
                 if audioEngine.isWaveMode {
-                    // Button 1 (Leftmost): Dislike
-                    Button {
-                        audioEngine.applyWaveTuning(.lessLikeThis)
-                    } label: {
-                        Image(systemName: "hand.thumbsdown.fill")
-                            .font(.system(size: 12))
-                            .foregroundStyle(YMTheme.fg60)
-                            .padding(6)
-                            .background(Circle().fill(Color.white.opacity(0.08)))
+                    if !windowState.isMiniWidth {
+                        // Button 1 (Leftmost): Dislike
+                        Button {
+                            audioEngine.applyWaveTuning(.lessLikeThis)
+                        } label: {
+                            Image(systemName: "hand.thumbsdown.fill")
+                                .font(.system(size: 12))
+                                .foregroundStyle(YMTheme.fg60)
+                                .padding(6)
+                                .background(Circle().fill(Color.white.opacity(0.08)))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(audioEngine.currentTrack == nil)
+                        .help("Меньше таких треков")
                     }
-                    .buttonStyle(.plain)
-                    .disabled(audioEngine.currentTrack == nil)
-                    .help("Меньше таких треков")
 
                     // Button 2: Previous Track
                     previousButton
@@ -164,40 +166,44 @@ public struct PlayerBarView: View {
                     // Button 4: Next Track
                     nextButton
 
-                    // Button 5 (Rightmost): Flame (More Like This)
-                    Button {
-                        audioEngine.applyWaveTuning(.moreLikeThis)
-                        isFlameActive = true
-                        Task {
-                            try? await Task.sleep(nanoseconds: 1_500_000_000)
-                            await MainActor.run {
-                                isFlameActive = false
+                    if !windowState.isMiniWidth {
+                        // Button 5 (Rightmost): Flame (More Like This)
+                        Button {
+                            audioEngine.applyWaveTuning(.moreLikeThis)
+                            isFlameActive = true
+                            Task {
+                                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                                await MainActor.run {
+                                    isFlameActive = false
+                                }
                             }
+                        } label: {
+                            Image(systemName: "flame.fill")
+                                .font(.system(size: 12))
+                                .foregroundStyle(isFlameActive ? Color.orange : YMTheme.accent)
+                                .padding(6)
+                                .background(Circle().fill(Color.white.opacity(0.08)))
                         }
-                    } label: {
-                        Image(systemName: "flame.fill")
-                            .font(.system(size: 12))
-                            .foregroundStyle(isFlameActive ? Color.orange : YMTheme.accent)
-                            .padding(6)
-                            .background(Circle().fill(Color.white.opacity(0.08)))
+                        .buttonStyle(.plain)
+                        .disabled(audioEngine.currentTrack == nil)
+                        .help("Больше таких треков")
                     }
-                    .buttonStyle(.plain)
-                    .disabled(audioEngine.currentTrack == nil)
-                    .help("Больше таких треков")
                 } else {
-                    // Button 1 (Leftmost): Shuffle
-                    Button {
-                        audioEngine.toggleShuffle()
-                    } label: {
-                        Image(systemName: "shuffle")
-                            .font(.system(size: 12))
-                            .foregroundStyle(audioEngine.isShuffleEnabled ? YMTheme.accent : YMTheme.fg60)
-                            .padding(6)
-                            .background(Circle().fill(audioEngine.isShuffleEnabled ? YMTheme.accent.opacity(0.15) : Color.white.opacity(0.08)))
+                    if !windowState.isMiniWidth {
+                        // Button 1 (Leftmost): Shuffle
+                        Button {
+                            audioEngine.toggleShuffle()
+                        } label: {
+                            Image(systemName: "shuffle")
+                                .font(.system(size: 12))
+                                .foregroundStyle(audioEngine.isShuffleEnabled ? YMTheme.accent : YMTheme.fg60)
+                                .padding(6)
+                                .background(Circle().fill(audioEngine.isShuffleEnabled ? YMTheme.accent.opacity(0.15) : Color.white.opacity(0.08)))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(audioEngine.currentTrack == nil && audioEngine.queue.isEmpty)
+                        .help(audioEngine.isShuffleEnabled ? "Выключить перемешивание" : "Перемешать очередь")
                     }
-                    .buttonStyle(.plain)
-                    .disabled(audioEngine.currentTrack == nil && audioEngine.queue.isEmpty)
-                    .help(audioEngine.isShuffleEnabled ? "Выключить перемешивание" : "Перемешать очередь")
 
                     // Button 2: Previous Track
                     previousButton
@@ -208,21 +214,23 @@ public struct PlayerBarView: View {
                     // Button 4: Next Track
                     nextButton
 
-                    // Button 5 (Rightmost): Start Wave from Current Track
-                    Button {
-                        if let track = audioEngine.currentTrack {
-                            audioEngine.startWave(forTrack: track)
+                    if !windowState.isMiniWidth {
+                        // Button 5 (Rightmost): Start Wave from Current Track
+                        Button {
+                            if let track = audioEngine.currentTrack {
+                                audioEngine.startWave(forTrack: track)
+                            }
+                        } label: {
+                            Image(systemName: "waveform.path.ecg")
+                                .font(.system(size: 12))
+                                .foregroundStyle(YMTheme.fg60)
+                                .padding(6)
+                                .background(Circle().fill(Color.white.opacity(0.08)))
                         }
-                    } label: {
-                        Image(systemName: "waveform.path.ecg")
-                            .font(.system(size: 12))
-                            .foregroundStyle(YMTheme.fg60)
-                            .padding(6)
-                            .background(Circle().fill(Color.white.opacity(0.08)))
+                        .buttonStyle(.plain)
+                        .disabled(audioEngine.currentTrack == nil)
+                        .help("Запустить Мою волну по текущему треку")
                     }
-                    .buttonStyle(.plain)
-                    .disabled(audioEngine.currentTrack == nil)
-                    .help("Запустить Мою волну по текущему треку")
                 }
             }
 
@@ -308,8 +316,10 @@ public struct PlayerBarView: View {
                 .help("Показать текст песни")
             }
 
-            // Fixed-Width Quality Badge Menu (NO icon, strictly constant width to prevent UI jumping)
-            AudioQualityMenu(audioEngine: audioEngine)
+            // Fixed-Width Quality Badge Menu (hidden in mini mode to prevent crowding)
+            if !windowState.isMiniWidth {
+                AudioQualityMenu(audioEngine: audioEngine)
+            }
 
             // Volume Control
             HStack(spacing: 6) {
@@ -337,7 +347,7 @@ public struct PlayerBarView: View {
                     trackColor: Color.white.opacity(0.12),
                     height: 3
                 )
-                .frame(width: 68)
+                .frame(width: windowState.isMiniWidth ? 46 : 68)
             }
         }
     }

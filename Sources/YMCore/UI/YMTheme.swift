@@ -1,16 +1,56 @@
 import SwiftUI
+import AppKit
 
-/// Modern theme and visual design tokens inspired by native macOS styling in KinoPohuy / Apple Music.
+/// Modern theme and visual design tokens supporting dynamic Dark & Light appearance.
 public enum YMTheme {
-    public static let bg = Color(red: 11 / 255, green: 11 / 255, blue: 13 / 255)
-    public static let sidebarBg = Color(red: 14 / 255, green: 14 / 255, blue: 17 / 255)
-    public static let playerBg = Color(red: 16 / 255, green: 16 / 255, blue: 20 / 255)
-    public static let surface = Color(red: 22 / 255, green: 22 / 255, blue: 26 / 255)
-    public static let surfaceHigh = Color(red: 32 / 255, green: 32 / 255, blue: 38 / 255)
-    public static let border = Color.white.opacity(0.08)
-    public static let borderHover = Color.white.opacity(0.25)
+    public static let bg = Color(nsColor: NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .aqua
+            ? NSColor(red: 246 / 255, green: 246 / 255, blue: 248 / 255, alpha: 1.0)
+            : NSColor(red: 11 / 255, green: 11 / 255, blue: 13 / 255, alpha: 1.0)
+    })
 
-    public static let fg = Color(red: 245 / 255, green: 245 / 255, blue: 247 / 255)
+    public static let sidebarBg = Color(nsColor: NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .aqua
+            ? NSColor(red: 236 / 255, green: 236 / 255, blue: 240 / 255, alpha: 1.0)
+            : NSColor(red: 14 / 255, green: 14 / 255, blue: 17 / 255, alpha: 1.0)
+    })
+
+    public static let playerBg = Color(nsColor: NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .aqua
+            ? NSColor(red: 255 / 255, green: 255 / 255, blue: 255 / 255, alpha: 0.98)
+            : NSColor(red: 16 / 255, green: 16 / 255, blue: 20 / 255, alpha: 0.96)
+    })
+
+    public static let surface = Color(nsColor: NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .aqua
+            ? NSColor(red: 240 / 255, green: 240 / 255, blue: 244 / 255, alpha: 1.0)
+            : NSColor(red: 22 / 255, green: 22 / 255, blue: 26 / 255, alpha: 1.0)
+    })
+
+    public static let surfaceHigh = Color(nsColor: NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .aqua
+            ? NSColor(red: 230 / 255, green: 230 / 255, blue: 236 / 255, alpha: 1.0)
+            : NSColor(red: 32 / 255, green: 32 / 255, blue: 38 / 255, alpha: 1.0)
+    })
+
+    public static let border = Color(nsColor: NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .aqua
+            ? NSColor(white: 0.0, alpha: 0.08)
+            : NSColor(white: 1.0, alpha: 0.08)
+    })
+
+    public static let borderHover = Color(nsColor: NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .aqua
+            ? NSColor(white: 0.0, alpha: 0.22)
+            : NSColor(white: 1.0, alpha: 0.25)
+    })
+
+    public static let fg = Color(nsColor: NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .aqua
+            ? NSColor(red: 20 / 255, green: 20 / 255, blue: 24 / 255, alpha: 1.0)
+            : NSColor(red: 245 / 255, green: 245 / 255, blue: 247 / 255, alpha: 1.0)
+    })
+
     public static let fg80 = fg.opacity(0.8)
     public static let fg60 = fg.opacity(0.6)
     public static let fg40 = fg.opacity(0.4)

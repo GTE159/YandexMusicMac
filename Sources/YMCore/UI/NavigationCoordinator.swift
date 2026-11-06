@@ -11,6 +11,7 @@ public final class NavigationCoordinator: @unchecked Sendable {
     public static let shared = NavigationCoordinator()
 
     public var path: [AppRoute] = []
+    public var selectedSection: SidebarSection = .myWave
     public var isLyricsPresented: Bool = false
     public var activeSimilarTrack: YMTrack? = nil
 
@@ -18,6 +19,11 @@ public final class NavigationCoordinator: @unchecked Sendable {
 
     public var canGoBack: Bool {
         !path.isEmpty
+    }
+
+    public func selectSection(_ section: SidebarSection) {
+        self.selectedSection = section
+        popToRoot()
     }
 
     public func navigate(to route: AppRoute) {

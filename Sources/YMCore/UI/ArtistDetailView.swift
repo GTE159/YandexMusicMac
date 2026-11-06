@@ -133,84 +133,16 @@ public struct ArtistDetailView: View {
                                 .foregroundStyle(YMTheme.fg)
                                 .padding(.horizontal, 24)
 
-                            VStack(spacing: 0) {
-                                ForEach(Array(info.popularTracks.prefix(10).enumerated()), id: \.element.id) { index, track in
-                                    HStack(spacing: 14) {
-                                        // Rank number
-                                        Text("\(index + 1)")
-                                            .font(.system(size: 13, weight: .bold).monospacedDigit())
-                                            .foregroundStyle(index < 3 ? YMTheme.accent : YMTheme.fg40)
-                                            .frame(width: 24, alignment: .trailing)
-
-                                        // Play / Waveform indicator
-                                        Button {
-                                            audioEngine.assignQueue(info.popularTracks, startingAt: index)
-                                        } label: {
-                                            if audioEngine.currentTrack?.id == track.id && audioEngine.isPlaying {
-                                                Image(systemName: "waveform")
-                                                    .foregroundColor(YMTheme.accent)
-                                                    .font(.system(size: 13))
-                                            } else {
-                                                Image(systemName: "play.fill")
-                                                    .font(.system(size: 11))
-                                                    .foregroundStyle(YMTheme.fg80)
-                                            }
-                                        }
-                                        .buttonStyle(.plain)
-
-                                        CachedCoverImage(
-                                            coverUri: track.effectiveCoverUri,
-                                            size: .small,
-                                            displaySize: 34,
-                                            cornerRadius: 4
-                                        )
-
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(track.displayTitle)
-                                                .font(.system(size: 13, weight: audioEngine.currentTrack?.id == track.id ? .semibold : .regular))
-                                                .foregroundStyle(audioEngine.currentTrack?.id == track.id ? YMTheme.accent : YMTheme.fg)
-                                                .lineLimit(1)
-
-                                            if let album = track.albums.first {
-                                                Button {
-                                                    coordinator.navigate(to: .album(id: album.id, title: album.title))
-                                                } label: {
-                                                    Text(album.title)
-                                                        .font(.caption)
-                                                        .foregroundStyle(YMTheme.fg40)
-                                                        .lineLimit(1)
-                                                }
-                                                .buttonStyle(.plain)
-                                            }
-                                        }
-
-                                        Spacer()
-
-                                        Button {
-                                            Task {
-                                                await likesService.toggleLike(track: track)
-                                            }
-                                        } label: {
-                                            Image(systemName: likesService.isLiked(trackId: track.id) ? "heart.fill" : "heart")
-                                                .foregroundColor(likesService.isLiked(trackId: track.id) ? YMTheme.heartRed : YMTheme.fg40)
-                                                .font(.system(size: 12))
-                                        }
-                                        .buttonStyle(.plain)
-
-                                        Text(track.formattedDuration)
-                                            .font(.caption.monospacedDigit())
-                                            .foregroundStyle(YMTheme.fg40)
-                                            .frame(width: 44, alignment: .trailing)
-                                    }
-                                    .padding(.vertical, 8)
-                                    .padding(.horizontal, 24)
-                                    .background(audioEngine.currentTrack?.id == track.id ? Color.white.opacity(0.04) : Color.clear)
-                                    .contentShape(Rectangle())
-                                    .onTapGesture(count: 2) {
+                            TrackTableView(
+                                tracks: Array(info.popularTracks.prefix(10)),
+                                onPlayTrack: { track in
+                                    if let index = info.popularTracks.firstIndex(where: { $0.id == track.id }) {
                                         audioEngine.assignQueue(info.popularTracks, startingAt: index)
                                     }
-                                }
-                            }
+                                },
+                                showAlbum: true
+                            )
+                            .padding(.horizontal, 14)
                         }
                     }
 

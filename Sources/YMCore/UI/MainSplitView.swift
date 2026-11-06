@@ -24,29 +24,35 @@ public enum SidebarSection: String, CaseIterable, Identifiable {
 
 /// Main macOS NavigationSplitView orchestrating the sidebar, NavigationStack, and the Player Bar.
 public struct MainSplitView: View {
-    @UIState private var selectedSection: SidebarSection = .myWave
     @UIState private var coordinator = NavigationCoordinator.shared
     @UIState private var authService = AuthService.shared
     @UIState private var audioEngine = AudioPlayerEngine.shared
     @UIState private var rotorService = RotorService.shared
     @UIState private var likesService = LikesService.shared
     @UIState private var windowState = WindowState.shared
+    @UIState private var themeManager = YMThemeManager.shared
     @UIState private var columnVisibility: NavigationSplitViewVisibility = .all
 
     public init() {}
 
+    private var selectedSection: SidebarSection {
+        coordinator.selectedSection
+    }
+
     public var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             sidebarContent
-                .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 300)
+                .navigationSplitViewColumnWidth(min: 200, ideal: 230, max: 280)
         } detail: {
             detailContent
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(themeManager.currentTheme.colorScheme)
         .toolbar(.hidden, for: .windowToolbar)
-        .frame(minWidth: 880, minHeight: 560)
+        .frame(minWidth: 440, minHeight: 320)
+        .ymTouchBar()
         .onAppear {
             setupRotorAudioHooks()
+            themeManager.updateWindowAppearance()
         }
     }
 
@@ -180,10 +186,7 @@ public struct MainSplitView: View {
         let isSelected = selectedSection == section
 
         Button {
-            if selectedSection != section {
-                selectedSection = section
-                coordinator.popToRoot()
-            }
+            coordinator.selectSection(section)
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: section.iconName)
@@ -235,7 +238,7 @@ public struct MainSplitView: View {
 
     @ViewBuilder
     private var detailContent: some View {
-        VStack(spacing: 0) {
+        ZStack(alignment: .topLeading) {
             NavigationStack(path: $coordinator.path) {
                 Group {
                     switch selectedSection {
@@ -263,8 +266,32 @@ public struct MainSplitView: View {
                     }
                 }
             }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                PlayerBarView()
+            }
 
-            PlayerBarView()
+            // Compact/Mini Window Sidebar Toggle Button
+            if windowState.isCompactWidth {
+                Button {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        columnVisibility = (columnVisibility == .detailOnly) ? .all : .detailOnly
+                    }
+                } label: {
+                    Image(systemName: "sidebar.left")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(YMTheme.fg80)
+                        .padding(8)
+                        .background(
+                            Circle()
+                                .fill(YMTheme.surface)
+                                .shadow(color: Color.black.opacity(0.3), radius: 6, y: 2)
+                        )
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, 16)
+                .padding(.top, 16)
+                .help("Показать/скрыть боковое меню")
+            }
         }
         .ignoresSafeArea(.container, edges: .top)
         .navigationTitle("")

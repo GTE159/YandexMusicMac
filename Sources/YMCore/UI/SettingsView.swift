@@ -4,6 +4,7 @@ import SwiftUI
 public struct SettingsView: View {
     @UIState private var audioEngine = AudioPlayerEngine.shared
     @UIState private var authService = AuthService.shared
+    @UIState private var themeManager = YMThemeManager.shared
     private let networkClient = YMNetworkClient.shared
 
     @UIState private var isMemoryCompressed = false
@@ -20,7 +21,7 @@ public struct SettingsView: View {
                         .font(.system(size: 28, weight: .bold))
                         .foregroundStyle(YMTheme.fg)
 
-                    Text("Параметры воспроизведения, звука и управления памятью")
+                    Text("Параметры воспроизведения, звука, темы и управления памятью")
                         .font(.subheadline)
                         .foregroundStyle(YMTheme.fg60)
                 }
@@ -28,6 +29,30 @@ public struct SettingsView: View {
 
                 Divider()
                     .overlay(YMTheme.border)
+
+                // Section 0: Appearance & Theme
+                settingsCard(title: "Внешний вид") {
+                    HStack(spacing: 16) {
+                        Text("Тема оформления:")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(YMTheme.fg80)
+
+                        Picker("", selection: Binding(
+                            get: { themeManager.currentTheme },
+                            set: { themeManager.setTheme($0) }
+                        )) {
+                            ForEach(YMAppTheme.allCases) { theme in
+                                HStack {
+                                    Image(systemName: theme.iconName)
+                                    Text(theme.title)
+                                }
+                                .tag(theme)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(width: 280)
+                    }
+                }
 
                 // Section 1: User Account Card
                 if let user = authService.currentUser {
