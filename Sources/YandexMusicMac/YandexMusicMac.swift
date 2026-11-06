@@ -274,6 +274,7 @@ struct YandexMusicMacApp: App {
         }
         Settings {
             SettingsView()
+                .preferredColorScheme(themeManager.currentTheme.colorScheme)
                 .frame(minWidth: 500, minHeight: 420)
         }
     }

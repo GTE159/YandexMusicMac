@@ -364,6 +364,7 @@ public final class AudioPlayerEngine {
 
     private func loadAndPlay(track: YMTrack, seekTo seekSeconds: Double?, autoPlay: Bool = true, forceRefresh: Bool = false, isInitialTrackStart: Bool = true) {
         loadTask?.cancel()
+        NavigationCoordinator.shared.lyricsTrack = nil
         if timeObserverToken == nil {
             setupTimeObserver()
         }

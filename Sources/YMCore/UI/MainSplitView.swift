@@ -57,11 +57,8 @@ public struct MainSplitView: View {
             setupKeyboardMonitor()
         }
         .onChange(of: windowState.isCompactWidth) { wasCompact, isCompact in
-            // When expanding from narrow window back to standard width, restore sidebar
-            if !isCompact && columnVisibility == .detailOnly {
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                    columnVisibility = .all
-                }
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                columnVisibility = isCompact ? .detailOnly : .all
             }
         }
     }
@@ -309,10 +306,15 @@ public struct MainSplitView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                    // Integrated Right-Side Lyrics Panel (occupies 1/2 to 2/3 of window width)
+                    // Integrated Right-Side Lyrics Panel: full-width overlay on compact windows (< 760pt),
+                    // or elegant right-hand 55% side panel with seamless black gradient on wider displays.
                     if coordinator.isLyricsPresented {
-                        let panelWidth = max(380, min(geo.size.width * 0.58, 720))
-                        LyricsSheetView(track: coordinator.lyricsTrack ?? audioEngine.currentTrack)
+                        let panelWidth: CGFloat = if geo.size.width < 760 {
+                            geo.size.width
+                        } else {
+                            max(380, min(geo.size.width * 0.55, 680))
+                        }
+                        LyricsSheetView()
                             .frame(width: panelWidth)
                             .frame(maxHeight: .infinity)
                             .transition(.move(edge: .trailing).combined(with: .opacity))

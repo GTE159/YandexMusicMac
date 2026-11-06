@@ -1,11 +1,8 @@
 import SwiftUI
 
-/// Integrated side panel for synchronized karaoke lyrics and text,
-/// featuring real-time LRC tracking, glowing brand yellow active line, tap-to-seek,
-/// and a translucent glass gradient looking monolithic with the main window.
+/// Integrated side panel for synchronized lyrics with a smooth transparent-to-black gradient,
+/// prominent active phrase typography, and no rectangular background highlight.
 public struct LyricsSheetView: View {
-    public let track: YMTrack?
-
     @UIState private var coordinator = NavigationCoordinator.shared
     @UIState private var audioEngine = AudioPlayerEngine.shared
     @UIState private var syncedLyrics: YMSyncedLyrics? = nil
@@ -15,12 +12,12 @@ public struct LyricsSheetView: View {
 
     private let networkClient = YMNetworkClient.shared
 
-    public init(track: YMTrack?) {
-        self.track = track
+    public init(track: YMTrack? = nil) {
+        // Parameter retained for backward compatibility; coordinator & audioEngine determine the current track
     }
 
     private var currentTrack: YMTrack? {
-        track ?? audioEngine.currentTrack
+        coordinator.lyricsTrack ?? audioEngine.currentTrack
     }
 
     private var activeLineIndex: Int? {
@@ -30,9 +27,6 @@ public struct LyricsSheetView: View {
     public var body: some View {
         VStack(spacing: 0) {
             headerBar
-
-            Divider()
-                .overlay(YMTheme.border)
 
             // Main Lyrics Viewport
             if isLoading {
@@ -46,37 +40,24 @@ public struct LyricsSheetView: View {
             } else {
                 emptyView
             }
-
-            Divider()
-                .overlay(YMTheme.border)
-
-            // Bottom Transport Control Bar
-            bottomPlaybackBar
         }
         .background {
-            ZStack {
-                VisualEffectBlur(material: .hudWindow, blendingMode: .withinWindow)
-
-                LinearGradient(
-                    colors: [
-                        YMTheme.surface.opacity(0.85),
-                        YMTheme.bg.opacity(0.92),
-                        YMTheme.bg.opacity(0.97)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            }
+            LinearGradient(
+                colors: [
+                    Color.black.opacity(0.0),
+                    Color.black.opacity(0.25),
+                    Color.black.opacity(0.65),
+                    Color.black.opacity(0.88),
+                    Color.black.opacity(0.96)
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
         }
-        .overlay(alignment: .leading) {
-            YMTheme.border
-                .frame(width: 1)
-        }
-        .shadow(color: Color.black.opacity(0.35), radius: 24, x: -6, y: 0)
-        .task {
+        .task(id: currentTrack?.id) {
             loadLyrics()
         }
-        .onChange(of: audioEngine.currentTrack?.id) { _, _ in
+        .onChange(of: currentTrack?.id) { _, _ in
             loadLyrics()
         }
         .onDisappear {
@@ -96,23 +77,23 @@ public struct LyricsSheetView: View {
                     displaySize: 42,
                     cornerRadius: 6
                 )
-                .shadow(color: Color.black.opacity(0.3), radius: 4, x: 0, y: 2)
+                .shadow(color: Color.black.opacity(0.4), radius: 4, x: 0, y: 2)
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(track.displayTitle)
                         .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(YMTheme.fg)
+                        .foregroundStyle(Color.white)
                         .lineLimit(1)
 
                     Text(track.artistsString)
                         .font(.system(size: 12))
-                        .foregroundStyle(YMTheme.fg60)
+                        .foregroundStyle(Color.white.opacity(0.6))
                         .lineLimit(1)
                 }
             } else {
                 Text("Текст песни")
                     .font(.headline)
-                    .foregroundStyle(YMTheme.fg)
+                    .foregroundStyle(Color.white)
             }
 
             Spacer()
@@ -125,17 +106,17 @@ public struct LyricsSheetView: View {
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(YMTheme.fg60)
+                    .foregroundStyle(Color.white.opacity(0.75))
                     .padding(8)
-                    .background(Circle().fill(YMTheme.surfaceComponent))
+                    .background(Circle().fill(Color.white.opacity(0.14)))
             }
             .buttonStyle(.plain)
             .keyboardShortcut(.escape, modifiers: [])
             .help("Закрыть субтитры (Esc)")
         }
         .padding(.horizontal, 24)
-        .padding(.vertical, 14)
-        .background(YMTheme.surface.opacity(0.5))
+        .padding(.vertical, 16)
+        .background(Color.clear)
     }
 
     // MARK: - Synced Karaoke View
@@ -144,7 +125,7 @@ public struct LyricsSheetView: View {
     private func syncedKaraokeView(synced: YMSyncedLyrics) -> some View {
         ScrollViewReader { proxy in
             ScrollView(.vertical, showsIndicators: false) {
-                LazyVStack(alignment: .leading, spacing: 18) {
+                LazyVStack(alignment: .leading, spacing: 20) {
                     // Top clearance so first lines can be centered
                     Color.clear
                         .frame(height: 100)
@@ -210,7 +191,7 @@ public struct LyricsSheetView: View {
                 Color.clear.frame(height: 30)
                 Text(text)
                     .font(.system(size: 20, weight: .medium, design: .rounded))
-                    .foregroundStyle(YMTheme.fg80)
+                    .foregroundStyle(Color.white.opacity(0.8))
                     .lineSpacing(10)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -220,116 +201,7 @@ public struct LyricsSheetView: View {
         }
     }
 
-    // MARK: - Bottom Playback Bar
 
-    @ViewBuilder
-    private var bottomPlaybackBar: some View {
-        if let target = currentTrack, target.id != audioEngine.currentTrack?.id {
-            HStack {
-                Text("Трек сейчас не играет")
-                    .font(.system(size: 12))
-                    .foregroundStyle(YMTheme.fg60)
-
-                Spacer()
-
-                Button {
-                    audioEngine.assignQueue([target], startingAt: 0)
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "play.fill")
-                            .font(.system(size: 11))
-                        Text("Слушать этот трек")
-                            .font(.system(size: 12, weight: .semibold))
-                    }
-                }
-                .buttonStyle(YMGlassPillButtonStyle(primary: true, height: 30))
-            }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 12)
-            .background(YMTheme.surface.opacity(0.5))
-        } else {
-            HStack(spacing: 16) {
-                // Live Time
-                Text(audioEngine.progressTracker.currentTimeFormatted)
-                    .font(.system(size: 12, weight: .medium).monospacedDigit())
-                    .foregroundStyle(YMTheme.fg60)
-                    .frame(width: 44, alignment: .leading)
-
-                // Seek slider
-                YMSlider(
-                    value: Binding(
-                        get: { audioEngine.progressTracker.progress },
-                        set: { newFraction in
-                            audioEngine.progressTracker.progress = newFraction
-                        }
-                    ),
-                    in: 0...1,
-                    activeColor: YMTheme.accent,
-                    height: 4,
-                    onEditingChanged: { dragging in
-                        audioEngine.progressTracker.isUserSeeking = dragging
-                        if !dragging {
-                            let target = audioEngine.progressTracker.currentTime
-                            audioEngine.seek(to: target)
-                        }
-                    }
-                )
-
-                // Total Duration
-                Text(audioEngine.progressTracker.durationFormatted)
-                    .font(.system(size: 12, weight: .medium).monospacedDigit())
-                    .foregroundStyle(YMTheme.fg60)
-                    .frame(width: 44, alignment: .trailing)
-
-                // Jump back 10s
-                Button {
-                    let target = max(0, audioEngine.progressTracker.currentTime - 10)
-                    audioEngine.seek(to: target)
-                } label: {
-                    Image(systemName: "gobackward.10")
-                        .font(.system(size: 15))
-                        .foregroundStyle(YMTheme.fg80)
-                        .padding(6)
-                }
-                .buttonStyle(.plain)
-                .help("Назад на 10 сек")
-
-                // Play / Pause
-                Button {
-                    audioEngine.togglePlayPause()
-                } label: {
-                    ZStack {
-                        Circle()
-                            .fill(YMTheme.accentFill)
-                            .frame(width: 32, height: 32)
-
-                        Image(systemName: audioEngine.isPlaying ? "pause.fill" : "play.fill")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundColor(Color.black)
-                    }
-                }
-                .buttonStyle(.plain)
-                .help(audioEngine.isPlaying ? "Пауза" : "Воспроизвести")
-
-                // Jump forward 10s
-                Button {
-                    let dur = audioEngine.progressTracker.duration
-                    let target = min(dur, audioEngine.progressTracker.currentTime + 10)
-                    audioEngine.seek(to: target)
-                } label: {
-                    Image(systemName: "goforward.10")
-                        .font(.system(size: 15))
-                        .foregroundStyle(YMTheme.fg80)
-                        .padding(6)
-                }
-                .buttonStyle(.plain)
-                .help("Вперед на 10 сек")
-            }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 12)
-            .background(YMTheme.surface.opacity(0.5))
-        }
-    }
 
     // MARK: - State Views
 
@@ -340,7 +212,7 @@ public struct LyricsSheetView: View {
                 .scaleEffect(1.2)
             Text("Загрузка текста песни...")
                 .font(.caption)
-                .foregroundStyle(YMTheme.fg40)
+                .foregroundStyle(Color.white.opacity(0.5))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -350,10 +222,10 @@ public struct LyricsSheetView: View {
         VStack(spacing: 12) {
             Image(systemName: "quote.bubble")
                 .font(.system(size: 36))
-                .foregroundStyle(YMTheme.fg40)
+                .foregroundStyle(Color.white.opacity(0.4))
             Text(msg)
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.white.opacity(0.7))
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
         }
@@ -365,10 +237,10 @@ public struct LyricsSheetView: View {
         VStack(spacing: 12) {
             Image(systemName: "quote.bubble")
                 .font(.system(size: 36))
-                .foregroundStyle(YMTheme.fg40)
+                .foregroundStyle(Color.white.opacity(0.4))
             Text("К сожалению, текст для этого трека пока не добавлен в Яндекс Музыку.")
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.white.opacity(0.7))
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
         }
@@ -436,7 +308,7 @@ private struct KaraokeLineRow: View {
 
     private var font: Font {
         .system(
-            size: isActive ? 28 : 21,
+            size: isActive ? 32 : 19,
             weight: isActive ? .bold : .medium,
             design: .rounded
         )
@@ -446,21 +318,11 @@ private struct KaraokeLineRow: View {
         if isActive {
             return YMTheme.accent
         } else if isPast {
-            return YMTheme.fg40
+            return Color.white.opacity(0.35)
         } else if isHovered {
-            return YMTheme.fg
+            return Color.white.opacity(0.9)
         } else {
-            return YMTheme.fg60
-        }
-    }
-
-    private var backgroundColor: Color {
-        if isActive {
-            return YMTheme.accent.opacity(0.12)
-        } else if isHovered {
-            return YMTheme.surfaceComponentHover
-        } else {
-            return Color.clear
+            return Color.white.opacity(0.55)
         }
     }
 
@@ -471,33 +333,29 @@ private struct KaraokeLineRow: View {
                     YMPlayingEqualizerView(
                         color: YMTheme.accent,
                         barWidth: 3,
-                        maxHeight: 16,
+                        maxHeight: 18,
                         isPlaying: isPlaying
                     )
-                    .frame(width: 20)
+                    .frame(width: 22)
                     .transition(.opacity)
                 } else {
                     Color.clear
-                        .frame(width: 20)
+                        .frame(width: 22)
                 }
 
                 Text(line.text)
                     .font(font)
                     .foregroundStyle(textColor)
-                    .shadow(color: isActive ? YMTheme.accent.opacity(0.35) : Color.clear, radius: isActive ? 10 : 0)
+                    .shadow(color: isActive ? YMTheme.accent.opacity(0.35) : Color.clear, radius: 8, x: 0, y: 0)
                     .multilineTextAlignment(.leading)
                     .lineSpacing(6)
                     .fixedSize(horizontal: false, vertical: true)
-                    .animation(.easeInOut(duration: 0.2), value: isActive)
+                    .animation(.easeInOut(duration: 0.22), value: isActive)
 
                 Spacer()
             }
-            .padding(.horizontal, 18)
+            .padding(.horizontal, 16)
             .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(backgroundColor)
-            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

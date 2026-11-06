@@ -18,19 +18,19 @@ public struct PlayerBarView: View {
         HStack(spacing: 0) {
             // Left: Track cover, Title, Artist, Like
             leftTrackSection
-                .frame(minWidth: windowState.isMiniWidth ? 110 : 160, maxWidth: 250, alignment: .leading)
+                .frame(minWidth: windowState.isMiniWidth ? 90 : (windowState.isCompactWidth ? 130 : 160), maxWidth: 250, alignment: .leading)
 
-            Spacer(minLength: 6)
+            Spacer(minLength: 4)
 
             // Center: Symmetrical Playback Controls & Progress Scrubber
             centerControlsSection
-                .frame(minWidth: windowState.isMiniWidth ? 160 : 280, maxWidth: 440)
+                .frame(minWidth: windowState.isMiniWidth ? 140 : (windowState.isCompactWidth ? 200 : 280), maxWidth: 440)
 
-            Spacer(minLength: 6)
+            Spacer(minLength: 4)
 
             // Right: Lyrics, Fixed-width Quality Badge & Volume Control
             rightControlsSection
-                .frame(minWidth: windowState.isMiniWidth ? 80 : 160, maxWidth: 250, alignment: .trailing)
+                .frame(minWidth: windowState.isMiniWidth ? 55 : (windowState.isCompactWidth ? 110 : 160), maxWidth: 250, alignment: .trailing)
         }
         .padding(.horizontal, windowState.isCompactWidth ? 12 : 20)
         .padding(.vertical, 8)

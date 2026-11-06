@@ -309,14 +309,15 @@ private struct YMPopupMenu<T: Hashable>: View {
             .padding(.vertical, 6)
             .background(
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(YMTheme.surfaceComponent)
+                    .fill(YMTheme.surface)
                     .overlay(
                         RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .strokeBorder(YMTheme.border, lineWidth: 1)
+                            .strokeBorder(YMTheme.borderHover, lineWidth: 1)
                     )
             )
         }
         .menuStyle(.borderlessButton)
+        .foregroundStyle(YMTheme.fg)
         .frame(width: width)
     }
 }

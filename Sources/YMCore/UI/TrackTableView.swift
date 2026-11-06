@@ -13,6 +13,7 @@ public struct TrackTableView: View {
     @UIState private var audioEngine = AudioPlayerEngine.shared
     @UIState private var likesService = LikesService.shared
     @UIState private var coordinator = NavigationCoordinator.shared
+    @UIState private var windowState = WindowState.shared
 
     public init(
         tracks: [YMTrack],
@@ -74,12 +75,15 @@ public struct TrackTableView: View {
             Text("#")
                 .frame(width: 36, alignment: .center)
 
+            Color.clear
+                .frame(width: 40)
+
             Text("ТРЕК")
-                .frame(minWidth: 200, alignment: .leading)
+                .frame(minWidth: windowState.isMiniWidth ? 120 : 180, alignment: .leading)
 
             Spacer()
 
-            if showAlbum {
+            if showAlbum && !windowState.isCompactWidth {
                 Text("АЛЬБОМ")
                     .frame(width: 180, alignment: .leading)
             }
@@ -111,6 +115,7 @@ private struct ModernTrackRow: View {
     @UIState private var likesService = LikesService.shared
     @UIState private var audioEngine = AudioPlayerEngine.shared
     @UIState private var coordinator = NavigationCoordinator.shared
+    @UIState private var windowState = WindowState.shared
     @UIState private var isHovered = false
     @UIState private var hoverTask: Task<Void, Never>? = nil
 
@@ -202,12 +207,12 @@ private struct ModernTrackRow: View {
                         .lineLimit(1)
                 }
             }
-            .frame(minWidth: 180, alignment: .leading)
+            .frame(minWidth: windowState.isMiniWidth ? 120 : 180, alignment: .leading)
 
             Spacer()
 
             // Album
-            if showAlbum {
+            if showAlbum && !windowState.isCompactWidth {
                 if let album = track.albums.first {
                     Button {
                         onAlbumSelect(album)

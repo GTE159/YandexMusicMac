@@ -9,6 +9,7 @@ public struct ChartView: View {
     @UIState private var audioEngine = AudioPlayerEngine.shared
     @UIState private var likesService = LikesService.shared
     @UIState private var coordinator = NavigationCoordinator.shared
+    @UIState private var windowState = WindowState.shared
     private let networkClient = YMNetworkClient.shared
 
     public init() {}
@@ -82,13 +83,18 @@ public struct ChartView: View {
                             Text("#")
                                 .frame(width: 44, alignment: .center)
 
+                            Color.clear
+                                .frame(width: 40)
+
                             Text("ТРЕК")
-                                .frame(minWidth: 200, alignment: .leading)
+                                .frame(minWidth: windowState.isMiniWidth ? 120 : 180, alignment: .leading)
 
                             Spacer()
 
-                            Text("АЛЬБОМ")
-                                .frame(width: 180, alignment: .leading)
+                            if !windowState.isCompactWidth {
+                                Text("АЛЬБОМ")
+                                    .frame(width: 180, alignment: .leading)
+                            }
 
                             Color.clear
                                 .frame(width: 32)
@@ -128,7 +134,7 @@ public struct ChartView: View {
                             }
                         }
                         .padding(.horizontal, 14)
-                        .padding(.bottom, 24)
+                        .padding(.bottom, 90)
                     }
                 }
             }
@@ -175,6 +181,7 @@ private struct ChartTrackRow: View {
     @UIState private var likesService = LikesService.shared
     @UIState private var audioEngine = AudioPlayerEngine.shared
     @UIState private var coordinator = NavigationCoordinator.shared
+    @UIState private var windowState = WindowState.shared
     @UIState private var isHovered = false
     @UIState private var hoverTask: Task<Void, Never>? = nil
 
@@ -188,7 +195,9 @@ private struct ChartTrackRow: View {
             coverAndPlayView
             titleAndArtistsView
             Spacer()
-            albumView
+            if !windowState.isCompactWidth {
+                albumView
+            }
             likeButtonView
             durationView
         }
@@ -321,7 +330,7 @@ private struct ChartTrackRow: View {
                 }
             }
         }
-        .frame(minWidth: 200, alignment: .leading)
+        .frame(minWidth: windowState.isMiniWidth ? 120 : 180, alignment: .leading)
     }
 
     @ViewBuilder
