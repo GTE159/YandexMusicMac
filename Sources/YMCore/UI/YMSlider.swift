@@ -67,6 +67,7 @@ public struct YMSlider: View {
                         .transition(.scale.combined(with: .opacity))
                 }
             }
+            .animation(.interactiveSpring(response: 0.15, dampingFraction: 0.85), value: normalizedProgress)
             .frame(maxHeight: .infinity, alignment: .center)
             .contentShape(Rectangle())
             .gesture(
@@ -87,10 +88,14 @@ public struct YMSlider: View {
                         let ratio = gesture.location.x / width
                         let clampedRatio = min(max(ratio, 0), 1)
                         let total = range.upperBound - range.lowerBound
-                        value = range.lowerBound + Double(clampedRatio) * total
-                        dragLocationRatio = nil
+                        let finalValue = range.lowerBound + Double(clampedRatio) * total
+                        value = finalValue
+                        dragLocationRatio = clampedRatio
                         isDragging = false
                         onEditingChanged?(false)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                            dragLocationRatio = nil
+                        }
                     }
             )
         }

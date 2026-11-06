@@ -244,7 +244,7 @@ public struct ArtistDetailView: View {
                     }
                 }
             }
-            .padding(.bottom, 60)
+            .padding(.bottom, 24)
         }
         .ymScreenBackground()
         .task {

@@ -84,8 +84,8 @@ public struct TrackTableView: View {
                     .frame(width: 180, alignment: .leading)
             }
 
-            Text("♡")
-                .frame(width: 32, alignment: .center)
+            Color.clear
+                .frame(width: 32)
 
             Text("ВРЕМЯ")
                 .frame(width: 50, alignment: .trailing)

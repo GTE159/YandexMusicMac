@@ -130,16 +130,15 @@ public struct SettingsView: View {
                                 .font(.system(size: 13, weight: .medium))
                                 .foregroundStyle(YMTheme.fg80)
 
-                            Picker("", selection: Binding(
-                                get: { audioEngine.qualitySettings.preset },
-                                set: { audioEngine.setAudioQualityPreset($0) }
-                            )) {
-                                ForEach(YMAudioQualityPreset.allCases) { preset in
-                                    Text(preset.title).tag(preset)
-                                }
-                            }
-                            .pickerStyle(.menu)
-                            .frame(width: 250)
+                            YMPopupMenu(
+                                selectedTitle: audioEngine.qualitySettings.preset.title,
+                                options: YMAudioQualityPreset.allCases.map { ($0, $0.title) },
+                                selection: Binding(
+                                    get: { audioEngine.qualitySettings.preset },
+                                    set: { audioEngine.setAudioQualityPreset($0) }
+                                ),
+                                width: 250
+                            )
                         }
 
                         HStack(spacing: 12) {
@@ -147,16 +146,15 @@ public struct SettingsView: View {
                                 .font(.system(size: 13))
                                 .foregroundStyle(YMTheme.fg80)
 
-                            Picker("", selection: Binding(
-                                get: { audioEngine.qualitySettings.codecPreference },
-                                set: { audioEngine.setCodecPreference($0) }
-                            )) {
-                                ForEach(YMAudioCodecPreference.allCases) { codec in
-                                    Text(codec.title).tag(codec)
-                                }
-                            }
-                            .pickerStyle(.menu)
-                            .frame(width: 220)
+                            YMPopupMenu(
+                                selectedTitle: audioEngine.qualitySettings.codecPreference.title,
+                                options: YMAudioCodecPreference.allCases.map { ($0, $0.title) },
+                                selection: Binding(
+                                    get: { audioEngine.qualitySettings.codecPreference },
+                                    set: { audioEngine.setCodecPreference($0) }
+                                ),
+                                width: 220
+                            )
                         }
 
                         Toggle(isOn: Binding(
@@ -188,17 +186,20 @@ public struct SettingsView: View {
                                 .font(.system(size: 13))
                                 .foregroundStyle(YMTheme.fg80)
 
-                            Picker("", selection: Binding(
-                                get: { audioEngine.qualitySettings.imageCacheLimitMB },
-                                set: { audioEngine.qualitySettings.setImageCacheLimitMB($0) }
-                            )) {
-                                Text("10 МБ").tag(10)
-                                Text("15 МБ (По умолчанию)").tag(15)
-                                Text("20 МБ").tag(20)
-                                Text("50 МБ").tag(50)
-                            }
-                            .pickerStyle(.menu)
-                            .frame(width: 190)
+                            YMPopupMenu(
+                                selectedTitle: cacheLimitTitle(audioEngine.qualitySettings.imageCacheLimitMB),
+                                options: [
+                                    (10, "10 МБ"),
+                                    (15, "15 МБ (По умолчанию)"),
+                                    (20, "20 МБ"),
+                                    (50, "50 МБ")
+                                ],
+                                selection: Binding(
+                                    get: { audioEngine.qualitySettings.imageCacheLimitMB },
+                                    set: { audioEngine.qualitySettings.setImageCacheLimitMB($0) }
+                                ),
+                                width: 200
+                            )
                         }
 
                         HStack(spacing: 12) {
@@ -256,5 +257,66 @@ public struct SettingsView: View {
                     .shadow(color: YMTheme.shadowColor, radius: 4, y: 1)
             )
         }
+    }
+
+    private func cacheLimitTitle(_ mb: Int) -> String {
+        switch mb {
+        case 10: return "10 МБ"
+        case 15: return "15 МБ (По умолчанию)"
+        case 20: return "20 МБ"
+        case 50: return "50 МБ"
+        default: return "\(mb) МБ"
+        }
+    }
+}
+
+// MARK: - Modern Theme-Aware Popup Menu
+
+private struct YMPopupMenu<T: Hashable>: View {
+    let selectedTitle: String
+    let options: [(T, String)]
+    let selection: Binding<T>
+    let width: CGFloat
+
+    var body: some View {
+        Menu {
+            ForEach(options, id: \.0) { item, label in
+                Button {
+                    selection.wrappedValue = item
+                } label: {
+                    HStack {
+                        Text(label)
+                        if selection.wrappedValue == item {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Text(selectedTitle)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(YMTheme.fg)
+                    .lineLimit(1)
+
+                Spacer()
+
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(YMTheme.fg40)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(YMTheme.surfaceComponent)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .strokeBorder(YMTheme.border, lineWidth: 1)
+                    )
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .frame(width: width)
     }
 }

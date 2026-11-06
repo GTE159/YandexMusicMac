@@ -125,7 +125,7 @@ public final class LikesService {
 
     /// Synchronizes liked track IDs with Yandex Music API
     public func syncLikes(uid: String? = nil) async throws {
-        guard let resolvedUid = uid ?? keychain.getUserId() else {
+        guard let resolvedUid = uid ?? AuthService.shared.currentUser?.userId ?? keychain.getUserId() else {
             print("[LikesService] No userId available to sync likes.")
             return
         }
@@ -155,7 +155,7 @@ public final class LikesService {
 
     /// Synchronizes liked items and immediately hydrates the first batch (up to 50 real tracks).
     public func fetchLikedTracks(initialLimit: Int = 50) async throws -> [YMTrack] {
-        guard let resolvedUid = keychain.getUserId() else {
+        guard let resolvedUid = AuthService.shared.currentUser?.userId ?? keychain.getUserId() else {
             print("[LikesService] No userId available to fetch liked tracks.")
             return []
         }
@@ -609,7 +609,7 @@ public final class LikesService {
     }
 
     private func addLike(trackId: String, albumId: String? = nil) async throws {
-        guard let uid = keychain.getUserId() ?? AuthService.shared.currentUser?.userId else { return }
+        guard let uid = AuthService.shared.currentUser?.userId ?? keychain.getUserId() else { return }
         let cleanId = extractCleanId(from: trackId)
 
         let cleanBody = "track-ids=\(cleanId)".data(using: .utf8)
@@ -650,7 +650,7 @@ public final class LikesService {
     }
 
     private func removeLike(trackId: String, albumId: String? = nil) async throws {
-        guard let uid = keychain.getUserId() ?? AuthService.shared.currentUser?.userId else { return }
+        guard let uid = AuthService.shared.currentUser?.userId ?? keychain.getUserId() else { return }
         let cleanId = extractCleanId(from: trackId)
 
         // В Yandex Music API эндпоинт для снятия отметки «Мне нравится» — строго /remove (НЕ /remove-multiple)

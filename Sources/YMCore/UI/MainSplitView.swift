@@ -242,60 +242,62 @@ public struct MainSplitView: View {
 
     @ViewBuilder
     private var detailContent: some View {
-        ZStack(alignment: .topLeading) {
-            NavigationStack(path: $coordinator.path) {
-                Group {
-                    switch selectedSection {
-                    case .myWave:
-                        MyWaveView()
-                    case .chart:
-                        ChartView()
-                    case .favorites:
-                        FavoritesListView()
-                    case .playlists:
-                        PlaylistsView()
-                    case .search:
-                        SearchView()
-                    case .settings:
-                        SettingsView()
+        VStack(spacing: 0) {
+            ZStack(alignment: .topLeading) {
+                NavigationStack(path: $coordinator.path) {
+                    Group {
+                        switch selectedSection {
+                        case .myWave:
+                            MyWaveView()
+                        case .chart:
+                            ChartView()
+                        case .favorites:
+                            FavoritesListView()
+                        case .playlists:
+                            PlaylistsView()
+                        case .search:
+                            SearchView()
+                        case .settings:
+                            SettingsView()
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .navigationDestination(for: AppRoute.self) { route in
+                        switch route {
+                        case .artist(let id, let name):
+                            ArtistDetailView(artistId: id, artistName: name)
+                        case .album(let id, let title):
+                            AlbumDetailView(albumId: id, albumTitle: title)
+                        }
                     }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .navigationDestination(for: AppRoute.self) { route in
-                    switch route {
-                    case .artist(let id, let name):
-                        ArtistDetailView(artistId: id, artistName: name)
-                    case .album(let id, let title):
-                        AlbumDetailView(albumId: id, albumTitle: title)
-                    }
-                }
-            }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                PlayerBarView()
-            }
 
-            // Compact/Mini Window Sidebar Toggle Button
-            if windowState.isCompactWidth {
-                Button {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                        columnVisibility = (columnVisibility == .detailOnly) ? .all : .detailOnly
+                // Compact/Mini Window Sidebar Toggle Button
+                if windowState.isCompactWidth {
+                    Button {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            columnVisibility = (columnVisibility == .detailOnly) ? .all : .detailOnly
+                        }
+                    } label: {
+                        Image(systemName: "sidebar.left")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(YMTheme.fg80)
+                            .padding(8)
+                            .background(
+                                Circle()
+                                    .fill(YMTheme.surface)
+                                    .shadow(color: Color.black.opacity(0.3), radius: 6, y: 2)
+                            )
                     }
-                } label: {
-                    Image(systemName: "sidebar.left")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(YMTheme.fg80)
-                        .padding(8)
-                        .background(
-                            Circle()
-                                .fill(YMTheme.surface)
-                                .shadow(color: Color.black.opacity(0.3), radius: 6, y: 2)
-                        )
+                    .buttonStyle(.plain)
+                    .padding(.leading, 16)
+                    .padding(.top, 16)
+                    .help("Показать/скрыть боковое меню")
                 }
-                .buttonStyle(.plain)
-                .padding(.leading, 16)
-                .padding(.top, 16)
-                .help("Показать/скрыть боковое меню")
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            PlayerBarView()
         }
         .ignoresSafeArea(.container, edges: .top)
         .navigationTitle("")

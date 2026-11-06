@@ -3,11 +3,15 @@ import Security
 
 /// Thread-safe manager for secure credentials storage in macOS Keychain.
 /// Uses `kSecAttrAccessibleAfterFirstUnlock` for background reliability and security.
-public final class KeychainManager: Sendable {
+/// Includes an in-memory cache to prevent repetitive macOS Keychain access permission prompts.
+public final class KeychainManager: @unchecked Sendable {
     public static let shared = KeychainManager()
 
     private let service: String
     private let accessGroup: String?
+
+    private let cacheLock = NSLock()
+    private var inMemoryCache: [String: String] = [:]
 
     public enum KeychainKey: String, Sendable {
         case oauthToken = "ym_oauth_token"
@@ -42,6 +46,10 @@ public final class KeychainManager: Sendable {
     // MARK: - Generic Secure Storage Operations
 
     public func setString(_ value: String, for key: KeychainKey) throws {
+        cacheLock.lock()
+        inMemoryCache[key.rawValue] = value
+        cacheLock.unlock()
+
         guard let data = value.data(using: .utf8) else {
             throw KeychainError.invalidDataConversion
         }
@@ -49,20 +57,40 @@ public final class KeychainManager: Sendable {
     }
 
     public func getString(for key: KeychainKey) throws -> String? {
+        cacheLock.lock()
+        if let cached = inMemoryCache[key.rawValue] {
+            cacheLock.unlock()
+            return cached
+        }
+        cacheLock.unlock()
+
         guard let data = try getData(for: key.rawValue) else {
             return nil
         }
         guard let string = String(data: data, encoding: .utf8) else {
             throw KeychainError.invalidDataConversion
         }
+
+        cacheLock.lock()
+        inMemoryCache[key.rawValue] = string
+        cacheLock.unlock()
+
         return string
     }
 
     public func delete(for key: KeychainKey) throws {
+        cacheLock.lock()
+        inMemoryCache.removeValue(forKey: key.rawValue)
+        cacheLock.unlock()
+
         try deleteData(for: key.rawValue)
     }
 
     public func clearAll() throws {
+        cacheLock.lock()
+        inMemoryCache.removeAll()
+        cacheLock.unlock()
+
         try delete(for: .oauthToken)
         try delete(for: .userId)
     }

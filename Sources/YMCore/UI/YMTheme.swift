@@ -160,7 +160,7 @@ public extension View {
     }
 
     func ymScreenBackground() -> some View {
-        background(YMTheme.bg.ignoresSafeArea())
+        background(YMTheme.bg)
     }
 }
 

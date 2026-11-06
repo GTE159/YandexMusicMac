@@ -228,11 +228,15 @@ public final class AudioPlayerEngine {
     }
 
     public func seek(to seconds: Double) {
+        progressTracker.currentTime = seconds
+        progressTracker.seekLockUntil = Date().addingTimeInterval(0.4)
+        lastObservedPlaybackTime = seconds
         let cmTime = CMTime(seconds: seconds, preferredTimescale: 600)
         player.seek(to: cmTime, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] completed in
             Task { @MainActor [weak self] in
                 guard let self = self, completed else { return }
                 self.progressTracker.currentTime = seconds
+                self.progressTracker.seekLockUntil = .distantPast
                 self.lastObservedPlaybackTime = seconds
                 NowPlayingController.shared.updatePlaybackPosition(seconds: seconds, isPlaying: self.isPlaying)
             }

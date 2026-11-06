@@ -10,6 +10,7 @@ public final class PlaybackProgressTracker {
     public var currentTime: Double = 0
     public var duration: Double = 0
     public var isUserSeeking: Bool = false
+    public var seekLockUntil: Date = .distantPast
 
     public init(currentTime: Double = 0, duration: Double = 0) {
         self.currentTime = currentTime
@@ -40,7 +41,8 @@ public final class PlaybackProgressTracker {
     }
 
     public func update(currentTime: Double, duration: Double) {
-        guard !isUserSeeking else { return }
+        // Block ticks while user is dragging OR while AVPlayer async seek is settling
+        guard !isUserSeeking, Date() >= seekLockUntil else { return }
         self.currentTime = currentTime
         if duration > 0 {
             self.duration = duration
@@ -51,6 +53,7 @@ public final class PlaybackProgressTracker {
         currentTime = 0
         duration = 0
         isUserSeeking = false
+        seekLockUntil = .distantPast
     }
 
     private func formatTime(_ seconds: Double) -> String {

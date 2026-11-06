@@ -25,12 +25,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         configureMainWindowIfNeeded()
     }
 
+    private var isClosingFromFullScreen = false
+
     /// Перехватываем нажатие на красный крестик: для главного окна вместо уничтожения скрываем его в фон,
     /// чтобы музыка и состояние UI сохранялись, а клик по Dock мгновенно возвращал окно.
+    /// В режиме Full Screen (Spaces) сначала плавно сворачиваем окно из пространства Spaces,
+    /// чтобы не оставлять пустой чёрный рабочий стол.
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         if sender === mainWindow {
-            sender.orderOut(nil)
-            return false
+            if sender.styleMask.contains(.fullScreen) {
+                isClosingFromFullScreen = true
+                sender.toggleFullScreen(nil)
+                return false
+            } else {
+                sender.orderOut(nil)
+                return false
+            }
         }
         return true
     }
@@ -41,6 +51,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func windowDidExitFullScreen(_ notification: Notification) {
         WindowState.shared.isFullScreen = false
+        if isClosingFromFullScreen {
+            isClosingFromFullScreen = false
+            DispatchQueue.main.async { [weak self] in
+                self?.mainWindow?.orderOut(nil)
+            }
+        }
     }
 
     func configureMainWindowIfNeeded() {
