@@ -1,11 +1,12 @@
 import SwiftUI
 
-/// Modern macOS Karaoke & Lyrics sheet featuring synchronized real-time LRC scrolling,
-/// active line glowing highlights, tap-to-seek, and interactive transport controls.
+/// Integrated side panel for synchronized karaoke lyrics and text,
+/// featuring real-time LRC tracking, glowing brand yellow active line, tap-to-seek,
+/// and a translucent glass gradient looking monolithic with the main window.
 public struct LyricsSheetView: View {
     public let track: YMTrack?
-    @Environment(\.dismiss) private var dismiss
 
+    @UIState private var coordinator = NavigationCoordinator.shared
     @UIState private var audioEngine = AudioPlayerEngine.shared
     @UIState private var syncedLyrics: YMSyncedLyrics? = nil
     @UIState private var supplement: YMTrackSupplement? = nil
@@ -52,8 +53,26 @@ public struct LyricsSheetView: View {
             // Bottom Transport Control Bar
             bottomPlaybackBar
         }
-        .frame(minWidth: 480, idealWidth: 540, maxWidth: 650, minHeight: 520, idealHeight: 640)
-        .ymScreenBackground()
+        .background {
+            ZStack {
+                VisualEffectBlur(material: .hudWindow, blendingMode: .withinWindow)
+
+                LinearGradient(
+                    colors: [
+                        YMTheme.surface.opacity(0.85),
+                        YMTheme.bg.opacity(0.92),
+                        YMTheme.bg.opacity(0.97)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
+        }
+        .overlay(alignment: .leading) {
+            YMTheme.border
+                .frame(width: 1)
+        }
+        .shadow(color: Color.black.opacity(0.35), radius: 24, x: -6, y: 0)
         .task {
             loadLyrics()
         }
@@ -61,7 +80,7 @@ public struct LyricsSheetView: View {
             loadLyrics()
         }
         .onDisappear {
-            NavigationCoordinator.shared.lyricsTrack = nil
+            coordinator.lyricsTrack = nil
         }
     }
 
@@ -74,7 +93,7 @@ public struct LyricsSheetView: View {
                 CachedCoverImage(
                     coverUri: track.effectiveCoverUri,
                     size: .small,
-                    displaySize: 44,
+                    displaySize: 42,
                     cornerRadius: 6
                 )
                 .shadow(color: Color.black.opacity(0.3), radius: 4, x: 0, y: 2)
@@ -98,37 +117,25 @@ public struct LyricsSheetView: View {
 
             Spacer()
 
-            if syncedLyrics != nil && !(syncedLyrics?.isEmpty ?? true) {
-                HStack(spacing: 5) {
-                    Image(systemName: "mic.fill")
-                        .font(.system(size: 10, weight: .bold))
-                    Text("КАРАОКЕ")
-                        .font(.system(size: 10, weight: .bold))
-                }
-                .foregroundColor(YMTheme.accent)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(
-                    Capsule()
-                        .fill(YMTheme.accent.opacity(0.16))
-                        .overlay(Capsule().strokeBorder(YMTheme.accent.opacity(0.35), lineWidth: 1))
-                )
-            }
-
             Button {
-                dismiss()
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    coordinator.isLyricsPresented = false
+                    coordinator.lyricsTrack = nil
+                }
             } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 20))
-                    .foregroundStyle(YMTheme.fg40)
+                Image(systemName: "xmark")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(YMTheme.fg60)
+                    .padding(8)
+                    .background(Circle().fill(YMTheme.surfaceComponent))
             }
             .buttonStyle(.plain)
-            .keyboardShortcut(.cancelAction)
-            .help("Закрыть")
+            .keyboardShortcut(.escape, modifiers: [])
+            .help("Закрыть субтитры (Esc)")
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 14)
-        .background(YMTheme.surface)
+        .background(YMTheme.surface.opacity(0.5))
     }
 
     // MARK: - Synced Karaoke View
@@ -138,9 +145,9 @@ public struct LyricsSheetView: View {
         ScrollViewReader { proxy in
             ScrollView(.vertical, showsIndicators: false) {
                 LazyVStack(alignment: .leading, spacing: 18) {
-                    // Generous top clearance so first lines can be vertically centered
+                    // Top clearance so first lines can be centered
                     Color.clear
-                        .frame(height: 120)
+                        .frame(height: 100)
 
                     ForEach(synced.lines) { line in
                         let isActive = line.id == activeLineIndex
@@ -163,7 +170,7 @@ public struct LyricsSheetView: View {
 
                     // Bottom clearance so final lines can reach the center
                     Color.clear
-                        .frame(height: 180)
+                        .frame(height: 160)
                 }
                 .padding(.horizontal, 24)
             }
@@ -198,16 +205,18 @@ public struct LyricsSheetView: View {
 
     @ViewBuilder
     private func staticLyricsView(text: String) -> some View {
-        ScrollView(.vertical) {
-            VStack(alignment: .leading, spacing: 18) {
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 22) {
+                Color.clear.frame(height: 30)
                 Text(text)
-                    .font(.system(size: 16, weight: .medium, design: .rounded))
+                    .font(.system(size: 20, weight: .medium, design: .rounded))
                     .foregroundStyle(YMTheme.fg80)
-                    .lineSpacing(8)
+                    .lineSpacing(10)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                Color.clear.frame(height: 60)
             }
-            .padding(32)
+            .padding(.horizontal, 28)
         }
     }
 
@@ -217,7 +226,7 @@ public struct LyricsSheetView: View {
     private var bottomPlaybackBar: some View {
         if let target = currentTrack, target.id != audioEngine.currentTrack?.id {
             HStack {
-                Text("Трек сейчас не воспроизводится")
+                Text("Трек сейчас не играет")
                     .font(.system(size: 12))
                     .foregroundStyle(YMTheme.fg60)
 
@@ -237,7 +246,7 @@ public struct LyricsSheetView: View {
             }
             .padding(.horizontal, 24)
             .padding(.vertical, 12)
-            .background(YMTheme.surface)
+            .background(YMTheme.surface.opacity(0.5))
         } else {
             HStack(spacing: 16) {
                 // Live Time
@@ -318,7 +327,7 @@ public struct LyricsSheetView: View {
             }
             .padding(.horizontal, 24)
             .padding(.vertical, 12)
-            .background(YMTheme.surface)
+            .background(YMTheme.surface.opacity(0.5))
         }
     }
 
@@ -426,7 +435,11 @@ private struct KaraokeLineRow: View {
     @UIState private var isHovered = false
 
     private var font: Font {
-        .system(size: isActive ? 24 : 18, weight: isActive ? .bold : .medium, design: .rounded)
+        .system(
+            size: isActive ? 28 : 21,
+            weight: isActive ? .bold : .medium,
+            design: .rounded
+        )
     }
 
     private var textColor: Color {
@@ -437,7 +450,7 @@ private struct KaraokeLineRow: View {
         } else if isHovered {
             return YMTheme.fg
         } else {
-            return YMTheme.fg80
+            return YMTheme.fg60
         }
     }
 
@@ -453,35 +466,36 @@ private struct KaraokeLineRow: View {
 
     var body: some View {
         Button(action: onSelect) {
-            HStack(alignment: .center, spacing: 12) {
+            HStack(alignment: .center, spacing: 14) {
                 if isActive {
                     YMPlayingEqualizerView(
                         color: YMTheme.accent,
-                        barWidth: 2.5,
-                        maxHeight: 14,
+                        barWidth: 3,
+                        maxHeight: 16,
                         isPlaying: isPlaying
                     )
-                    .frame(width: 18)
+                    .frame(width: 20)
                     .transition(.opacity)
                 } else {
                     Color.clear
-                        .frame(width: 18)
+                        .frame(width: 20)
                 }
 
                 Text(line.text)
                     .font(font)
                     .foregroundStyle(textColor)
-                    .shadow(color: isActive ? YMTheme.accent.opacity(0.4) : Color.clear, radius: isActive ? 10 : 0)
+                    .shadow(color: isActive ? YMTheme.accent.opacity(0.35) : Color.clear, radius: isActive ? 10 : 0)
                     .multilineTextAlignment(.leading)
+                    .lineSpacing(6)
                     .fixedSize(horizontal: false, vertical: true)
                     .animation(.easeInOut(duration: 0.2), value: isActive)
 
                 Spacer()
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 6)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 8)
             .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(backgroundColor)
             )
             .contentShape(Rectangle())

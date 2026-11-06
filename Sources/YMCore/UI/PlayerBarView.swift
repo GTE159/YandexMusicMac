@@ -56,9 +56,6 @@ public struct PlayerBarView: View {
                 .frame(height: 1)
         }
         .shadow(color: YMTheme.playerBarShadow, radius: 10, x: 0, y: -4)
-        .sheet(isPresented: $coordinator.isLyricsPresented) {
-            LyricsSheetView(track: coordinator.lyricsTrack ?? audioEngine.currentTrack)
-        }
     }
 
     // MARK: - Left Track Section
@@ -308,7 +305,14 @@ public struct PlayerBarView: View {
             // Lyrics Button (only shown if lyrics are available)
             if let track = audioEngine.currentTrack, track.hasLyrics {
                 Button {
-                    coordinator.showLyrics(for: track)
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                        if coordinator.isLyricsPresented {
+                            coordinator.isLyricsPresented = false
+                            coordinator.lyricsTrack = nil
+                        } else {
+                            coordinator.showLyrics(for: track)
+                        }
+                    }
                 } label: {
                     Image(systemName: "quote.bubble.fill")
                         .font(.system(size: 12))

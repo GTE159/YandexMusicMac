@@ -253,56 +253,70 @@ public struct MainSplitView: View {
     @ViewBuilder
     private var detailContent: some View {
         ZStack(alignment: .bottom) {
-            ZStack(alignment: .topLeading) {
-                NavigationStack(path: $coordinator.path) {
-                    Group {
-                        switch selectedSection {
-                        case .myWave:
-                            MyWaveView()
-                        case .chart:
-                            ChartView()
-                        case .favorites:
-                            FavoritesListView()
-                        case .playlists:
-                            PlaylistsView()
-                        case .search:
-                            SearchView()
-                        case .settings:
-                            SettingsView()
+            GeometryReader { geo in
+                ZStack(alignment: .topTrailing) {
+                    ZStack(alignment: .topLeading) {
+                        NavigationStack(path: $coordinator.path) {
+                            Group {
+                                switch selectedSection {
+                                case .myWave:
+                                    MyWaveView()
+                                case .chart:
+                                    ChartView()
+                                case .favorites:
+                                    FavoritesListView()
+                                case .playlists:
+                                    PlaylistsView()
+                                case .search:
+                                    SearchView()
+                                case .settings:
+                                    SettingsView()
+                                }
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .navigationDestination(for: AppRoute.self) { route in
+                                switch route {
+                                case .artist(let id, let name):
+                                    ArtistDetailView(artistId: id, artistName: name)
+                                case .album(let id, let title):
+                                    AlbumDetailView(albumId: id, albumTitle: title)
+                                }
+                            }
+                        }
+
+                        // Sidebar Toggle Button: always visible whenever in compact window OR whenever sidebar is collapsed
+                        if windowState.isCompactWidth || columnVisibility == .detailOnly {
+                            Button {
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                    columnVisibility = (columnVisibility == .detailOnly) ? .all : .detailOnly
+                                }
+                            } label: {
+                                Image(systemName: "sidebar.left")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(YMTheme.fg80)
+                                    .padding(8)
+                                    .background(
+                                        Circle()
+                                            .fill(YMTheme.surface)
+                                            .shadow(color: Color.black.opacity(0.3), radius: 6, y: 2)
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.leading, 16)
+                            .padding(.top, 16)
+                            .help("Показать/скрыть боковое меню")
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .navigationDestination(for: AppRoute.self) { route in
-                        switch route {
-                        case .artist(let id, let name):
-                            ArtistDetailView(artistId: id, artistName: name)
-                        case .album(let id, let title):
-                            AlbumDetailView(albumId: id, albumTitle: title)
-                        }
-                    }
-                }
 
-                // Sidebar Toggle Button: always visible whenever in compact window OR whenever sidebar is collapsed
-                if windowState.isCompactWidth || columnVisibility == .detailOnly {
-                    Button {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                            columnVisibility = (columnVisibility == .detailOnly) ? .all : .detailOnly
-                        }
-                    } label: {
-                        Image(systemName: "sidebar.left")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(YMTheme.fg80)
-                            .padding(8)
-                            .background(
-                                Circle()
-                                    .fill(YMTheme.surface)
-                                    .shadow(color: Color.black.opacity(0.3), radius: 6, y: 2)
-                            )
+                    // Integrated Right-Side Lyrics Panel (occupies 1/2 to 2/3 of window width)
+                    if coordinator.isLyricsPresented {
+                        let panelWidth = max(380, min(geo.size.width * 0.58, 720))
+                        LyricsSheetView(track: coordinator.lyricsTrack ?? audioEngine.currentTrack)
+                            .frame(width: panelWidth)
+                            .frame(maxHeight: .infinity)
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
                     }
-                    .buttonStyle(.plain)
-                    .padding(.leading, 16)
-                    .padding(.top, 16)
-                    .help("Показать/скрыть боковое меню")
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
