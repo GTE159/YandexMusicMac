@@ -42,7 +42,7 @@ public enum YMAppTheme: String, CaseIterable, Identifiable, Sendable {
 }
 
 /// Centralized application theme manager with UserDefaults persistence
-/// and real-time AppKit NSWindow appearance synchronization.
+/// and real-time AppKit window appearance synchronization.
 @MainActor
 @Observable
 public final class YMThemeManager {
@@ -64,7 +64,9 @@ public final class YMThemeManager {
         } else {
             self.currentTheme = .dark
         }
-        updateWindowAppearance()
+        // Do not call updateWindowAppearance() here:
+        // YMThemeManager.shared is accessed during App.init, before NSApplication is fully running.
+        // AppDelegate calls updateWindowAppearance() on launch once windows are ready.
     }
 
     public func setTheme(_ theme: YMAppTheme) {
@@ -78,8 +80,9 @@ public final class YMThemeManager {
         case .light: NSAppearance(named: .aqua)
         }
 
-        NSApp.appearance = appKitAppearance
-        for window in NSApp.windows where !(window is NSPanel) {
+        // Use NSApplication.shared (always safe, avoids implicitly unwrapped NSApp nil during early launch)
+        NSApplication.shared.appearance = appKitAppearance
+        for window in NSApplication.shared.windows where !(window is NSPanel) {
             window.appearance = appKitAppearance
         }
     }
