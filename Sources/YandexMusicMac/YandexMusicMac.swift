@@ -145,6 +145,16 @@ struct YandexMusicMacApp: App {
                 }
                 .keyboardShortcut(.leftArrow, modifiers: [.command])
 
+                Button("Вперед на 5 секунд") {
+                    AudioPlayerEngine.shared.seekRelative(by: 5.0)
+                }
+                .keyboardShortcut(.rightArrow, modifiers: [])
+
+                Button("Назад на 5 секунд") {
+                    AudioPlayerEngine.shared.seekRelative(by: -5.0)
+                }
+                .keyboardShortcut(.leftArrow, modifiers: [])
+
                 Divider()
 
                 Button("Увеличить громкость") {

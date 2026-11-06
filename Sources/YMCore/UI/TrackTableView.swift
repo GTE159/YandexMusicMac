@@ -256,17 +256,17 @@ private struct ModernTrackRow: View {
             hoverTask?.cancel()
             if hovering {
                 hoverTask = Task {
-                    // Debounce: when scrolling, row leaves cursor before debounce finishes, preventing flying hover boxes
-                    try? await Task.sleep(nanoseconds: 90_000_000)
+                    // Fast responsive hover with light debounce during rapid scroll
+                    try? await Task.sleep(nanoseconds: 20_000_000)
                     guard !Task.isCancelled else { return }
                     await MainActor.run {
-                        withAnimation(.easeInOut(duration: 0.15)) {
+                        withAnimation(.easeInOut(duration: 0.08)) {
                             isHovered = true
                         }
                     }
                 }
             } else {
-                withAnimation(.easeOut(duration: 0.12)) {
+                withAnimation(.easeOut(duration: 0.08)) {
                     isHovered = false
                 }
             }

@@ -645,15 +645,30 @@ public actor YMNetworkClient {
     }
 
     /// Response envelope for GET /tracks/{trackId}/lyrics
-    public struct YMLyricsEnvelope: Codable, Sendable {
+    public struct YMLyricsEnvelope: Decodable, Sendable {
         public let downloadUrl: String?
         public let lyricId: Int?
         public let externalLyricId: String?
 
         enum CodingKeys: String, CodingKey {
-            case downloadUrl = "download_url"
-            case lyricId = "lyric_id"
-            case externalLyricId = "external_lyric_id"
+            case downloadUrl
+            case downloadUrlSnake = "download_url"
+            case downloadUrlKebab = "download-url"
+            case lyricId
+            case lyricIdSnake = "lyric_id"
+            case externalLyricId
+            case externalLyricIdSnake = "external_lyric_id"
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            self.downloadUrl = (try? container.decodeIfPresent(String.self, forKey: .downloadUrl))
+                ?? (try? container.decodeIfPresent(String.self, forKey: .downloadUrlSnake))
+                ?? (try? container.decodeIfPresent(String.self, forKey: .downloadUrlKebab))
+            self.lyricId = (try? container.decodeIfPresent(Int.self, forKey: .lyricId))
+                ?? (try? container.decodeIfPresent(Int.self, forKey: .lyricIdSnake))
+            self.externalLyricId = (try? container.decodeIfPresent(String.self, forKey: .externalLyricId))
+                ?? (try? container.decodeIfPresent(String.self, forKey: .externalLyricIdSnake))
         }
     }
 
@@ -680,12 +695,19 @@ public actor YMNetworkClient {
             return nil
         }
 
-        guard let downloadUrl = envelope.downloadUrl, !downloadUrl.isEmpty else {
+        guard let downloadUrl = envelope.downloadUrl, !downloadUrl.isEmpty,
+              let s3URL = URL(string: downloadUrl) else {
             return nil
         }
 
-        let (data, response) = try await performRawRequest(endpoint: downloadUrl)
-        guard response.statusCode == 200, let lrcContent = String(data: data, encoding: .utf8) else {
+        // Direct request to S3 without OAuth header to avoid S3 authentication signature mismatch
+        var s3Request = URLRequest(url: s3URL)
+        s3Request.cachePolicy = .useProtocolCachePolicy
+        s3Request.timeoutInterval = 15
+        let (data, response) = try await session.data(for: s3Request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 200,
+              let lrcContent = String(data: data, encoding: .utf8) else {
             return nil
         }
 

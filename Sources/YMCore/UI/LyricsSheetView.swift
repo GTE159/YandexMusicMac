@@ -170,6 +170,24 @@ public struct LyricsSheetView: View {
                     proxy.scrollTo(id, anchor: .center)
                 }
             }
+            .onAppear {
+                if let id = activeLineIndex {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        withAnimation(.easeInOut(duration: 0.35)) {
+                            proxy.scrollTo(id, anchor: .center)
+                        }
+                    }
+                }
+            }
+            .onChange(of: synced.lines.count) { _, _ in
+                if let id = activeLineIndex {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        withAnimation(.easeInOut(duration: 0.35)) {
+                            proxy.scrollTo(id, anchor: .center)
+                        }
+                    }
+                }
+            }
         }
     }
 

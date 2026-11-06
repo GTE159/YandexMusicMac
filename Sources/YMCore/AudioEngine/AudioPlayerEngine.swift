@@ -227,6 +227,14 @@ public final class AudioPlayerEngine {
         }
     }
 
+    /// Relative seek in seconds (+5 or -5 seconds).
+    public func seekRelative(by seconds: Double) {
+        let current = progressTracker.currentTime
+        let dur = progressTracker.duration
+        let target = min(max(current + seconds, 0.0), dur > 0 ? dur : max(0.0, current + seconds))
+        seek(to: target)
+    }
+
     public func seek(to seconds: Double) {
         progressTracker.currentTime = seconds
         progressTracker.seekLockUntil = Date().addingTimeInterval(0.4)
@@ -584,7 +592,7 @@ public final class AudioPlayerEngine {
     // MARK: - Periodic Time & Preload Observer
 
     private func setupTimeObserver() {
-        let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
+        let interval = CMTime(seconds: 0.15, preferredTimescale: 600)
         timeObserverToken = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             Task { @MainActor [weak self] in
                 guard let self = self, self.isPlaying else { return }

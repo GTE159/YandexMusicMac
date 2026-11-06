@@ -46,6 +46,7 @@ public struct MainSplitView: View {
         } detail: {
             detailContent
         }
+        .navigationSplitViewStyle(.balanced)
         .preferredColorScheme(themeManager.currentTheme.colorScheme)
         .toolbar(.hidden, for: .windowToolbar)
         .frame(minWidth: 440, minHeight: 320)
@@ -53,6 +54,15 @@ public struct MainSplitView: View {
         .onAppear {
             setupRotorAudioHooks()
             themeManager.updateWindowAppearance()
+            setupKeyboardMonitor()
+        }
+        .onChange(of: windowState.isCompactWidth) { wasCompact, isCompact in
+            // When expanding from narrow window back to standard width, restore sidebar
+            if !isCompact && columnVisibility == .detailOnly {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                    columnVisibility = .all
+                }
+            }
         }
     }
 
@@ -272,8 +282,8 @@ public struct MainSplitView: View {
                     }
                 }
 
-                // Compact/Mini Window Sidebar Toggle Button
-                if windowState.isCompactWidth {
+                // Sidebar Toggle Button: always visible whenever in compact window OR whenever sidebar is collapsed
+                if windowState.isCompactWidth || columnVisibility == .detailOnly {
                     Button {
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                             columnVisibility = (columnVisibility == .detailOnly) ? .all : .detailOnly
@@ -326,6 +336,29 @@ public struct MainSplitView: View {
             Task {
                 try? await rotorService.sendTrackSkipped(track: track, playedSeconds: playedSeconds)
             }
+        }
+    }
+
+    private func setupKeyboardMonitor() {
+        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            // If the user is currently editing text in a search field or text view, preserve native cursor navigation
+            if let responder = NSApp.keyWindow?.firstResponder,
+               responder is NSTextView || responder is NSText {
+                return event
+            }
+
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            // Bare Left Arrow (123) and Right Arrow (124) without Command/Option/Control
+            if flags.isEmpty {
+                if event.keyCode == 123 { // Left Arrow
+                    audioEngine.seekRelative(by: -5.0)
+                    return nil
+                } else if event.keyCode == 124 { // Right Arrow
+                    audioEngine.seekRelative(by: 5.0)
+                    return nil
+                }
+            }
+            return event
         }
     }
 }
