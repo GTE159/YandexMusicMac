@@ -28,6 +28,17 @@ public enum YMAudioURLSigner {
         return String(base64.prefix(43))
     }
 
+    /// Computes HMAC-SHA256 signature for GET /tracks/{trackId}/lyrics?format=LRC
+    /// Formula: HMAC<SHA256>(secretKey, "\(numericTrackId)\(timestamp)")
+    /// Signature: standard Base64 representation.
+    public static func computeLyricsSign(trackId: String, timestamp: Int) -> String {
+        let numericTrackId = trackId.components(separatedBy: ":").first ?? trackId
+        let message = "\(numericTrackId)\(timestamp)"
+        let key = SymmetricKey(data: Data(fileInfoSecretKey.utf8))
+        let signature = HMAC<SHA256>.authenticationCode(for: Data(message.utf8), using: key)
+        return Data(signature).base64EncodedString()
+    }
+
     /// Computes MD5 hex digest string (lowercase) from raw string data.
     public static func md5Hex(_ string: String) -> String {
         let digest = Insecure.MD5.hash(data: Data(string.utf8))

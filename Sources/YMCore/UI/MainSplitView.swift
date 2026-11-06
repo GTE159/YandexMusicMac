@@ -242,7 +242,7 @@ public struct MainSplitView: View {
 
     @ViewBuilder
     private var detailContent: some View {
-        VStack(spacing: 0) {
+        ZStack(alignment: .bottom) {
             ZStack(alignment: .topLeading) {
                 NavigationStack(path: $coordinator.path) {
                     Group {
@@ -296,6 +296,9 @@ public struct MainSplitView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .safeAreaInset(edge: .bottom) {
+                Color.clear.frame(height: 76)
+            }
 
             PlayerBarView()
         }

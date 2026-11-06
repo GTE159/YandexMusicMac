@@ -644,6 +644,55 @@ public actor YMNetworkClient {
         try await request(endpoint: "/tracks/\(trackId)/supplement")
     }
 
+    /// Response envelope for GET /tracks/{trackId}/lyrics
+    public struct YMLyricsEnvelope: Codable, Sendable {
+        public let downloadUrl: String?
+        public let lyricId: Int?
+        public let externalLyricId: String?
+
+        enum CodingKeys: String, CodingKey {
+            case downloadUrl = "download_url"
+            case lyricId = "lyric_id"
+            case externalLyricId = "external_lyric_id"
+        }
+    }
+
+    /// Fetches time-synchronized LRC lyrics for a track, signed with HMAC-SHA256.
+    /// Returns nil if synchronized lyrics are not available for this track.
+    public func fetchTrackLyricsLRC(trackId: String) async throws -> YMSyncedLyrics? {
+        let numericId = trackId.components(separatedBy: ":").first ?? trackId
+        let timestamp = Int(Date().timeIntervalSince1970)
+        let sign = YMAudioURLSigner.computeLyricsSign(trackId: numericId, timestamp: timestamp)
+
+        let queryItems = [
+            URLQueryItem(name: "format", value: "LRC"),
+            URLQueryItem(name: "timeStamp", value: String(timestamp)),
+            URLQueryItem(name: "sign", value: sign)
+        ]
+
+        let envelope: YMLyricsEnvelope
+        do {
+            envelope = try await request(
+                endpoint: "/tracks/\(numericId)/lyrics",
+                queryItems: queryItems
+            )
+        } catch {
+            return nil
+        }
+
+        guard let downloadUrl = envelope.downloadUrl, !downloadUrl.isEmpty else {
+            return nil
+        }
+
+        let (data, response) = try await performRawRequest(endpoint: downloadUrl)
+        guard response.statusCode == 200, let lrcContent = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+
+        let synced = YMSyncedLyrics.parse(lrcContent: lrcContent)
+        return synced.isEmpty ? nil : synced
+    }
+
     /// GET /tracks/{trackId}/similar
     public func fetchSimilarTracks(trackId: String) async throws -> [YMTrack] {
         struct SimilarResponse: Codable, Sendable {

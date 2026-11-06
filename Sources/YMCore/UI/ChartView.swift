@@ -18,68 +18,7 @@ public struct ChartView: View {
     }
 
     public var body: some View {
-        VStack(spacing: 0) {
-            // Top Header
-            HStack(alignment: .center, spacing: 16) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Чарт")
-                        .font(.system(size: 28, weight: .bold))
-                        .foregroundStyle(YMTheme.fg)
-
-                    Text("Топ треков, которые прямо сейчас слушают в Яндекс Музыке")
-                        .font(.system(size: 13))
-                        .foregroundStyle(YMTheme.fg60)
-                }
-
-                Spacer()
-
-                if !chartTracks.isEmpty {
-                    Button {
-                        audioEngine.assignQueue(chartTracks, startingAt: 0)
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "play.fill")
-                                .font(.system(size: 12))
-                            Text("Слушать чарт")
-                                .font(.system(size: 13, weight: .semibold))
-                        }
-                    }
-                    .buttonStyle(YMGlassPillButtonStyle(primary: true, height: 36))
-                }
-            }
-            .padding(.horizontal, 24)
-            .padding(.top, 24)
-            .padding(.bottom, 16)
-
-            // Table Column Headers
-            HStack(spacing: 12) {
-                Text("#")
-                    .frame(width: 44, alignment: .center)
-
-                Text("ТРЕК")
-                    .frame(minWidth: 200, alignment: .leading)
-
-                Spacer()
-
-                Text("АЛЬБОМ")
-                    .frame(width: 180, alignment: .leading)
-
-                Color.clear
-                    .frame(width: 32)
-
-                Text("ВРЕМЯ")
-                    .frame(width: 50, alignment: .trailing)
-            }
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(YMTheme.fg40)
-            .padding(.horizontal, 24)
-            .padding(.bottom, 8)
-
-            Divider()
-                .overlay(YMTheme.border)
-                .padding(.horizontal, 24)
-
-            // Main Content
+        Group {
             if isLoading {
                 VStack(spacing: 16) {
                     ProgressView()
@@ -105,30 +44,92 @@ public struct ChartView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView(.vertical) {
-                    LazyVStack(spacing: 2) {
-                        ForEach(Array(chartItems.enumerated()), id: \.element.id) { index, item in
-                            if let track = item.track {
-                                ChartTrackRow(
-                                    item: item,
-                                    track: track,
-                                    index: index,
-                                    isPlaying: audioEngine.currentTrack?.id == track.id && audioEngine.isPlaying,
-                                    onPlay: {
-                                        audioEngine.assignQueue(chartTracks, startingAt: index)
-                                    },
-                                    onArtistSelect: { artist in
-                                        coordinator.navigate(to: .artist(id: artist.id, name: artist.name))
-                                    },
-                                    onAlbumSelect: { album in
-                                        coordinator.navigate(to: .album(id: album.id, title: album.title))
+                    VStack(alignment: .leading, spacing: 0) {
+                        // Top Header
+                        HStack(alignment: .center, spacing: 16) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Чарт")
+                                    .font(.system(size: 28, weight: .bold))
+                                    .foregroundStyle(YMTheme.fg)
+
+                                Text("Топ треков, которые прямо сейчас слушают в Яндекс Музыке")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(YMTheme.fg60)
+                            }
+
+                            Spacer()
+
+                            if !chartTracks.isEmpty {
+                                Button {
+                                    audioEngine.assignQueue(chartTracks, startingAt: 0)
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "play.fill")
+                                            .font(.system(size: 12))
+                                        Text("Слушать чарт")
+                                            .font(.system(size: 13, weight: .semibold))
                                     }
-                                )
+                                }
+                                .buttonStyle(YMGlassPillButtonStyle(primary: true, height: 36))
                             }
                         }
+                        .padding(.horizontal, 24)
+                        .padding(.top, 24)
+                        .padding(.bottom, 16)
+
+                        // Table Column Headers
+                        HStack(spacing: 12) {
+                            Text("#")
+                                .frame(width: 44, alignment: .center)
+
+                            Text("ТРЕК")
+                                .frame(minWidth: 200, alignment: .leading)
+
+                            Spacer()
+
+                            Text("АЛЬБОМ")
+                                .frame(width: 180, alignment: .leading)
+
+                            Color.clear
+                                .frame(width: 32)
+
+                            Text("ВРЕМЯ")
+                                .frame(width: 50, alignment: .trailing)
+                        }
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(YMTheme.fg40)
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 8)
+
+                        Divider()
+                            .overlay(YMTheme.border)
+                            .padding(.horizontal, 24)
+                            .padding(.bottom, 6)
+
+                        LazyVStack(spacing: 2) {
+                            ForEach(Array(chartItems.enumerated()), id: \.element.id) { index, item in
+                                if let track = item.track {
+                                    ChartTrackRow(
+                                        item: item,
+                                        track: track,
+                                        index: index,
+                                        isPlaying: audioEngine.currentTrack?.id == track.id && audioEngine.isPlaying,
+                                        onPlay: {
+                                            audioEngine.assignQueue(chartTracks, startingAt: index)
+                                        },
+                                        onArtistSelect: { artist in
+                                            coordinator.navigate(to: .artist(id: artist.id, name: artist.name))
+                                        },
+                                        onAlbumSelect: { album in
+                                            coordinator.navigate(to: .album(id: album.id, title: album.title))
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.bottom, 24)
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.top, 4)
-                    .padding(.bottom, 90)
                 }
             }
         }
