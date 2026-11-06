@@ -209,7 +209,10 @@ private struct ChartTrackRow: View {
     @ViewBuilder
     private var rankView: some View {
         HStack(spacing: 3) {
-            if position <= 3 {
+            if isPlaying {
+                YMPlayingEqualizerView(color: YMTheme.accent, barWidth: 2, maxHeight: 12, isPlaying: audioEngine.isPlaying)
+                    .frame(width: 22, alignment: .center)
+            } else if position <= 3 {
                 Text("\(position)")
                     .font(.system(size: 14, weight: .bold).monospacedDigit())
                     .foregroundColor(YMTheme.accent)
@@ -241,9 +244,20 @@ private struct ChartTrackRow: View {
                 RoundedRectangle(cornerRadius: 6)
                     .fill(Color.black.opacity(0.6))
                     .frame(width: 40, height: 40)
-                Image(systemName: "waveform")
-                    .foregroundColor(YMTheme.accent)
-                    .font(.system(size: 14, weight: .bold))
+
+                if isHovered {
+                    Button {
+                        audioEngine.togglePlayPause()
+                    } label: {
+                        Image(systemName: audioEngine.isPlaying ? "pause.fill" : "play.fill")
+                            .foregroundColor(YMTheme.accent)
+                            .font(.system(size: 14, weight: .bold))
+                    }
+                    .buttonStyle(.plain)
+                    .help(audioEngine.isPlaying ? "Пауза" : "Воспроизвести")
+                } else {
+                    YMPlayingEqualizerView(color: YMTheme.accent, barWidth: 2.5, maxHeight: 15, isPlaying: audioEngine.isPlaying)
+                }
             } else if isHovered {
                 Button {
                     onPlay()

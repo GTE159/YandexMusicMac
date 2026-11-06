@@ -1,7 +1,10 @@
 import SwiftUI
 
-/// Modern, visually stunning "Моя волна" view featuring an animated pulsing wave orb,
-/// interactive vibe presets, tuning controls, and the upcoming wave queue.
+/// Modern, visually stunning "Моя волна" view inspired by the official Yandex Music web design.
+/// Features a cinematic Aurora Nebula background, massive typography, floating album cover,
+/// glass capsule track pill with volume and animated equalizers, prominent playback controls,
+/// interactive vibe selectors, and the upcoming wave queue.
+/// Does NOT auto-play on navigation.
 public struct MyWaveView: View {
     @UIState private var waveTracks: [YMTrack] = []
     @UIState private var rotorService = RotorService.shared
@@ -15,8 +18,12 @@ public struct MyWaveView: View {
     @UIState private var errorMessage: String? = nil
     @UIState private var toastMessage: String? = nil
     @UIState private var toastDismissTask: Task<Void, Never>? = nil
+
     @UIState private var waveOrbRotation: Double = 0
     @UIState private var waveOrbScale: CGFloat = 1.0
+    @UIState private var isFlameActive: Bool = false
+    @UIState private var isMuted: Bool = false
+    @UIState private var previousVolume: Float = 1.0
 
     public init() {}
 
@@ -28,31 +35,32 @@ public struct MyWaveView: View {
     }
 
     public var body: some View {
-        ScrollView(.vertical) {
-            VStack(spacing: 24) {
-                // Wave Hero Card with Animated Orb
-                waveHeroCard
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(spacing: 28) {
+                // Main Cinematic Hero Stage
+                waveHeroStage
 
-                // Vibe Presets Selector
+                // Vibe / Mood Selectors
                 vibePresetsSelector
 
                 // Tuning Feedback Toast
                 if let toast = toastMessage {
-                    HStack(spacing: 8) {
-                        Image(systemName: "checkmark.circle.fill")
+                    HStack(spacing: 10) {
+                        Image(systemName: "sparkles")
                             .foregroundColor(YMTheme.accent)
-                            .font(.system(size: 13))
+                            .font(.system(size: 13, weight: .bold))
                         Text(toast)
-                            .font(.system(size: 12, weight: .medium))
+                            .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(YMTheme.fg)
                         Spacer()
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
                     .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color.white.opacity(0.08))
-                            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(YMTheme.border, lineWidth: 1))
+                        Capsule()
+                            .fill(Color.black.opacity(0.75))
+                            .overlay(Capsule().strokeBorder(YMTheme.accent.opacity(0.4), lineWidth: 1))
+                            .shadow(color: YMTheme.accent.opacity(0.2), radius: 8)
                     )
                     .padding(.horizontal, 24)
                     .transition(.move(edge: .top).combined(with: .opacity))
@@ -60,7 +68,7 @@ public struct MyWaveView: View {
 
                 // Error message banner
                 if let error = errorMessage {
-                    HStack(spacing: 10) {
+                    HStack(spacing: 12) {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .foregroundColor(.orange)
                         Text("Ошибка загрузки волны: \(error)")
@@ -74,360 +82,594 @@ public struct MyWaveView: View {
                     }
                     .padding(14)
                     .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color.orange.opacity(0.1))
-                            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.orange.opacity(0.3), lineWidth: 1))
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color.orange.opacity(0.12))
+                            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.orange.opacity(0.3), lineWidth: 1))
                     )
                     .padding(.horizontal, 24)
                 }
 
-                // Upcoming Wave Queue Section
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Далее в волне")
-                                .font(.system(size: 18, weight: .bold))
-                                .foregroundStyle(YMTheme.fg)
-
-                            Text("Треки, подобранные алгоритмом на основе ваших предпочтений")
-                                .font(.caption)
-                                .foregroundStyle(YMTheme.fg40)
-                        }
-
-                        Spacer()
-
-                        if isLoadingMoreWave {
-                            ProgressView()
-                                .scaleEffect(0.8)
-                        }
-                    }
-                    .padding(.horizontal, 24)
-
-                    if displayedWaveTracks.isEmpty && isLoadingWave {
-                        VStack(spacing: 14) {
-                            ProgressView()
-                                .scaleEffect(1.2)
-                            Text("Подбираем музыку для вашей волны...")
-                                .font(.caption)
-                                .foregroundStyle(YMTheme.fg40)
-                        }
-                        .frame(maxWidth: .infinity, minHeight: 200)
-                    } else if displayedWaveTracks.isEmpty {
-                        VStack(spacing: 12) {
-                            Image(systemName: "waveform.path.ecg")
-                                .font(.system(size: 40))
-                                .foregroundStyle(YMTheme.fg40)
-                            Text("Волна готова к воспроизведению")
-                                .font(.headline)
-                                .foregroundStyle(YMTheme.fg)
-                            Button {
-                                startWave(context: .myWaveDefault, vibe: .defaultWave)
-                            } label: {
-                                Label("Включить Мою волну", systemImage: "play.fill")
-                            }
-                            .buttonStyle(YMGlassPillButtonStyle(primary: true, height: 36))
-                        }
-                        .frame(maxWidth: .infinity, minHeight: 200)
-                    } else {
-                        TrackTableView(
-                            tracks: displayedWaveTracks,
-                            onPlayTrack: { track in
-                                if let idx = displayedWaveTracks.firstIndex(where: { $0.id == track.id }) {
-                                    audioEngine.playTrack(at: idx)
-                                }
-                            },
-                            onLoadMore: {
-                                Task {
-                                    await loadMoreTracks()
-                                }
-                            }
-                        )
-                        .padding(.horizontal, 14)
-                    }
+                // Upcoming Wave Queue Section: "Далее в волне"
+                if !displayedWaveTracks.isEmpty || isLoadingWave {
+                    upcomingQueueSection
                 }
             }
-            .padding(.top, 20)
-            .padding(.bottom, 60)
+            .padding(.top, 16)
+            .padding(.bottom, 80)
         }
         .ymScreenBackground()
         .onAppear {
+            // NEVER auto-start playback on navigation
             if audioEngine.isWaveMode && !audioEngine.queue.isEmpty {
                 waveTracks = audioEngine.queue
-            } else if waveTracks.isEmpty && !audioEngine.isWaveMode {
-                startWave(context: .myWaveDefault, vibe: .defaultWave)
             }
             setupWaveChangeHooks()
+            withAnimation(.linear(duration: 25).repeatForever(autoreverses: false)) {
+                waveOrbRotation = 360
+            }
+            withAnimation(.easeInOut(duration: 3.2).repeatForever(autoreverses: true)) {
+                waveOrbScale = 1.15
+            }
         }
     }
 
-    // MARK: - Wave Hero Card with Animated Orb
+    // MARK: - Hero Stage (Yandex Music Aurora Nebula)
 
-    private var waveHeroCard: some View {
+    @ViewBuilder
+    private var waveHeroStage: some View {
         ZStack {
-            // Ambient background glow
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color(red: 30 / 255, green: 25 / 255, blue: 10 / 255),
-                            Color(red: 20 / 255, green: 15 / 255, blue: 25 / 255),
-                            Color(red: 14 / 255, green: 14 / 255, blue: 18 / 255)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .strokeBorder(YMTheme.border, lineWidth: 1)
-                )
+            // Ambient Aurora Nebula
+            auroraNebulaBackground
 
-            HStack(spacing: 28) {
-                // Pulsing Animated Orb
-                ZStack {
-                    // Outer pulsating halo
-                    Circle()
-                        .fill(
-                            RadialGradient(
-                                colors: [
-                                    YMTheme.accent.opacity(audioEngine.isPlaying ? 0.35 : 0.15),
-                                    Color.purple.opacity(audioEngine.isPlaying ? 0.25 : 0.05),
-                                    Color.clear
-                                ],
-                                center: .center,
-                                startRadius: 10,
-                                endRadius: 85
-                            )
-                        )
-                        .frame(width: 170, height: 170)
-                        .scaleEffect(audioEngine.isPlaying ? waveOrbScale : 1.0)
-                        .animation(audioEngine.isPlaying ? .easeInOut(duration: 1.8).repeatForever(autoreverses: true) : .default, value: waveOrbScale)
-
-                    // Rotating inner gradient orb
-                    Circle()
-                        .fill(
-                            AngularGradient(
-                                colors: [
-                                    Color(red: 255 / 255, green: 204 / 255, blue: 0 / 255),
-                                    Color(red: 255 / 255, green: 102 / 255, blue: 0 / 255),
-                                    Color(red: 233 / 255, green: 30 / 255, blue: 99 / 255),
-                                    Color(red: 156 / 255, green: 39 / 255, blue: 176 / 255),
-                                    Color(red: 33 / 255, green: 150 / 255, blue: 243 / 255),
-                                    Color(red: 255 / 255, green: 204 / 255, blue: 0 / 255)
-                                ],
-                                center: .center
-                            )
-                        )
-                        .frame(width: 100, height: 100)
-                        .blur(radius: 12)
-                        .rotationEffect(.degrees(waveOrbRotation))
-                        .animation(audioEngine.isPlaying ? .linear(duration: 12).repeatForever(autoreverses: false) : .default, value: waveOrbRotation)
-
-                    // Central Play / Pause Button
-                    Button {
-                        if audioEngine.isWaveMode && audioEngine.isPlaying {
-                            audioEngine.pause()
-                        } else if audioEngine.isWaveMode {
-                            audioEngine.play()
-                        } else {
-                            startWave(context: audioEngine.activeWaveContext, vibe: audioEngine.activeWaveVibe)
-                        }
-                    } label: {
-                        ZStack {
-                            Circle()
-                                .fill(Color.black.opacity(0.75))
-                                .frame(width: 56, height: 56)
-                                .overlay(Circle().strokeBorder(Color.white.opacity(0.2), lineWidth: 1.5))
-
-                            Image(systemName: (audioEngine.isWaveMode && audioEngine.isPlaying) ? "pause.fill" : "play.fill")
-                                .font(.system(size: 22, weight: .bold))
-                                .foregroundStyle(YMTheme.accent)
-                                .offset(x: (audioEngine.isWaveMode && audioEngine.isPlaying) ? 0 : 2)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .shadow(color: .black.opacity(0.5), radius: 10, y: 4)
-                }
-                .frame(width: 170, height: 170)
-                .onAppear {
-                    waveOrbRotation = 360
-                    waveOrbScale = 1.15
-                }
-
-                // Info & Now Playing
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "waveform.path.ecg")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(YMTheme.accent)
-
-                        Text(audioEngine.activeWaveContext.title)
-                            .font(.system(size: 24, weight: .bold))
-                            .foregroundStyle(YMTheme.fg)
-
-                        if audioEngine.activeWaveContext != .myWaveDefault {
-                            Button {
-                                startWave(context: .myWaveDefault, vibe: .defaultWave)
-                            } label: {
-                                Image(systemName: "arrow.uturn.backward.circle.fill")
-                                    .font(.system(size: 16))
-                                    .foregroundStyle(YMTheme.fg60)
-                            }
-                            .buttonStyle(.plain)
-                            .help("Сбросить к Моей волне")
-                        }
-                    }
-
-                    Text(audioEngine.activeWaveContext.subtitle)
-                        .font(.system(size: 13))
-                        .foregroundStyle(YMTheme.fg60)
-                        .lineLimit(2)
-
-                    // Current track info if active
-                    if let track = audioEngine.currentTrack, audioEngine.isWaveMode {
-                        HStack(spacing: 12) {
-                            CachedCoverImage(
-                                coverUri: track.effectiveCoverUri,
-                                size: .small,
-                                displaySize: 42,
-                                cornerRadius: 6
-                            )
-
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(track.displayTitle)
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(YMTheme.fg)
-                                    .lineLimit(1)
-
-                                Text(track.artistsString)
-                                    .font(.caption)
-                                    .foregroundStyle(YMTheme.fg60)
-                                    .lineLimit(1)
-                            }
-
-                            Spacer()
-
-                            // Wave Tuning Fast Buttons
-                            HStack(spacing: 8) {
-                                Button {
-                                    audioEngine.applyWaveTuning(.moreLikeThis)
-                                    showToast("Алгоритм учёл: больше треков в стиле «\(track.displayTitle)»")
-                                } label: {
-                                    Image(systemName: "flame.fill")
-                                        .font(.system(size: 13))
-                                        .foregroundStyle(YMTheme.accent)
-                                        .padding(8)
-                                        .background(Circle().fill(Color.white.opacity(0.08)))
-                                }
-                                .buttonStyle(.plain)
-                                .help("Больше таких треков")
-
-                                Button {
-                                    audioEngine.applyWaveTuning(.lessLikeThis)
-                                    showToast("Пропущено: меньше треков в стиле «\(track.displayTitle)»")
-                                } label: {
-                                    Image(systemName: "hand.thumbsdown.fill")
-                                        .font(.system(size: 13))
-                                        .foregroundStyle(YMTheme.fg60)
-                                        .padding(8)
-                                        .background(Circle().fill(Color.white.opacity(0.08)))
-                                }
-                                .buttonStyle(.plain)
-                                .help("Меньше таких треков")
-
-                                Button {
-                                    Task {
-                                        await likesService.toggleLike(track: track)
-                                    }
-                                } label: {
-                                    Image(systemName: likesService.isLiked(trackId: track.id) ? "heart.fill" : "heart")
-                                        .font(.system(size: 13))
-                                        .foregroundColor(likesService.isLiked(trackId: track.id) ? YMTheme.heartRed : YMTheme.fg60)
-                                        .padding(8)
-                                        .background(Circle().fill(Color.white.opacity(0.08)))
-                                }
-                                .buttonStyle(.plain)
-                                .help("Мне нравится")
-                            }
-                        }
-                        .padding(10)
-                        .background(
-                            RoundedRectangle(cornerRadius: 10)
-                                .fill(Color.black.opacity(0.3))
-                                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(YMTheme.border, lineWidth: 1))
-                        )
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+            // Foreground Content
+            if let track = audioEngine.currentTrack, audioEngine.isWaveMode {
+                activeWaveContent(track: track)
+            } else {
+                idleWaveContent
             }
-            .padding(24)
         }
+        .frame(minHeight: 400)
         .padding(.horizontal, 24)
     }
 
-    // MARK: - Vibe Presets Selector
+    // MARK: - Aurora Nebula Background
+
+    private var auroraNebulaBackground: some View {
+        ZStack {
+            // Deep cosmic container
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 16 / 255, green: 14 / 255, blue: 18 / 255),
+                            Color(red: 10 / 255, green: 10 / 255, blue: 14 / 255),
+                            Color.black
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                )
+
+            // Luminous Outer Nebula Aura
+            Circle()
+                .fill(
+                    RadialGradient(
+                        colors: [
+                            Color(red: 235 / 255, green: 20 / 255, blue: 120 / 255).opacity(audioEngine.isPlaying ? 0.35 : 0.18),
+                            Color(red: 255 / 255, green: 140 / 255, blue: 0 / 255).opacity(audioEngine.isPlaying ? 0.30 : 0.15),
+                            Color(red: 120 / 255, green: 30 / 255, blue: 200 / 255).opacity(audioEngine.isPlaying ? 0.22 : 0.10),
+                            Color.clear
+                        ],
+                        center: .center,
+                        startRadius: 20,
+                        endRadius: 180
+                    )
+                )
+                .frame(width: 360, height: 360)
+                .scaleEffect(audioEngine.isPlaying ? waveOrbScale : 1.0)
+                .blur(radius: 40)
+
+            // Dynamic Rotating Core Mesh
+            Circle()
+                .fill(
+                    AngularGradient(
+                        colors: [
+                            Color(red: 255 / 255, green: 210 / 255, blue: 0 / 255),
+                            Color(red: 255 / 255, green: 90 / 255, blue: 20 / 255),
+                            Color(red: 235 / 255, green: 20 / 255, blue: 120 / 255),
+                            Color(red: 130 / 255, green: 30 / 255, blue: 210 / 255),
+                            Color(red: 30 / 255, green: 144 / 255, blue: 255 / 255),
+                            Color(red: 255 / 255, green: 210 / 255, blue: 0 / 255)
+                        ],
+                        center: .center
+                    )
+                )
+                .frame(width: 210, height: 210)
+                .rotationEffect(.degrees(waveOrbRotation))
+                .blur(radius: 28)
+                .opacity(audioEngine.isPlaying ? 0.85 : 0.45)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
+
+    // MARK: - Active Wave Content (Like Yandex Music Web)
+
+    @ViewBuilder
+    private func activeWaveContent(track: YMTrack) -> some View {
+        VStack(spacing: 16) {
+            // Top Tag: Wave Context Chip
+            HStack {
+                Spacer()
+                HStack(spacing: 6) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 11, weight: .bold))
+                    Text(audioEngine.activeWaveContext.title)
+                        .font(.system(size: 12, weight: .semibold))
+
+                    if audioEngine.activeWaveContext != .myWaveDefault {
+                        Button {
+                            startWave(context: .myWaveDefault, vibe: audioEngine.activeWaveVibe)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 12))
+                                .foregroundStyle(YMTheme.fg60)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Сбросить к обычной Моей волне")
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Capsule().fill(Color.black.opacity(0.45)))
+                .overlay(Capsule().strokeBorder(Color.white.opacity(0.15), lineWidth: 1))
+                .foregroundColor(YMTheme.accent)
+            }
+            .padding(.top, 14)
+            .padding(.horizontal, 20)
+
+            // Massive Cinematic Artist Title
+            Button {
+                if let artist = track.artists.first {
+                    coordinator.navigate(to: .artist(id: artist.id, name: artist.name))
+                }
+            } label: {
+                Text(track.artistsString)
+                    .font(.system(size: windowState.isCompactWidth ? 34 : 46, weight: .black, design: .default))
+                    .foregroundStyle(Color.white)
+                    .lineLimit(1)
+                    .shadow(color: Color.black.opacity(0.6), radius: 8, y: 3)
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 24)
+
+            // Floating Album Cover
+            Button {
+                if let album = track.albums.first {
+                    coordinator.navigate(to: .album(id: album.id, title: album.title))
+                }
+            } label: {
+                CachedCoverImage(
+                    coverUri: track.effectiveCoverUri,
+                    size: .medium,
+                    displaySize: 114,
+                    cornerRadius: 16
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.2), lineWidth: 1.5)
+                )
+                .shadow(color: Color.black.opacity(0.6), radius: 18, x: 0, y: 8)
+                .scaleEffect(audioEngine.isPlaying ? 1.02 : 1.0)
+            }
+            .buttonStyle(.plain)
+            .help("Перейти к альбому")
+
+            // Floating Translucent Glass Capsule Pill (Directly below Cover)
+            HStack(spacing: 12) {
+                // Mute / Speaker toggle
+                Button {
+                    toggleMute()
+                } label: {
+                    Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                        .font(.system(size: 13))
+                        .foregroundStyle(YMTheme.fg60)
+                }
+                .buttonStyle(.plain)
+                .help(isMuted ? "Включить звук" : "Выключить звук")
+
+                // Track Title + Mini Equalizer
+                Text(track.displayTitle)
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(Color.white)
+                    .lineLimit(1)
+
+                YMPlayingEqualizerView(
+                    color: YMTheme.accent,
+                    barWidth: 2,
+                    maxHeight: 12,
+                    isPlaying: audioEngine.isPlaying
+                )
+
+                // Heart (Like) button
+                Button {
+                    Task {
+                        await likesService.toggleLike(track: track)
+                    }
+                } label: {
+                    Image(systemName: likesService.isLiked(trackId: track.id) ? "heart.fill" : "heart")
+                        .font(.system(size: 14))
+                        .foregroundColor(likesService.isLiked(trackId: track.id) ? YMTheme.heartRed : YMTheme.fg60)
+                }
+                .buttonStyle(.plain)
+                .help("Мне нравится")
+
+                // More Menu
+                Menu {
+                    if let album = track.albums.first {
+                        Button("Перейти к альбому") {
+                            coordinator.navigate(to: .album(id: album.id, title: album.title))
+                        }
+                    }
+                    if let artist = track.artists.first {
+                        Button("Перейти к артисту") {
+                            coordinator.navigate(to: .artist(id: artist.id, name: artist.name))
+                        }
+                    }
+                    Divider()
+                    Button("Копировать ссылку") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString("https://music.yandex.ru/track/\(track.id)", forType: .string)
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 13))
+                        .foregroundStyle(YMTheme.fg60)
+                }
+                .menuStyle(.borderlessButton)
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 8)
+            .background(
+                Capsule()
+                    .fill(Color.black.opacity(0.55))
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.15), lineWidth: 1))
+                    .shadow(color: Color.black.opacity(0.4), radius: 10, y: 4)
+            )
+
+            // Playback Controls Row (Symmetrical & Prominent)
+            HStack(spacing: 28) {
+                // Dislike
+                Button {
+                    audioEngine.applyWaveTuning(.lessLikeThis)
+                    showToast("Меньше таких треков в волне")
+                } label: {
+                    Image(systemName: "hand.thumbsdown.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(YMTheme.fg60)
+                        .padding(10)
+                        .background(Circle().fill(Color.black.opacity(0.4)))
+                        .overlay(Circle().strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .help("Меньше таких треков")
+
+                // Previous
+                Button {
+                    audioEngine.previous()
+                } label: {
+                    Image(systemName: "backward.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(YMTheme.fg80)
+                }
+                .buttonStyle(.plain)
+                .help("Предыдущий трек")
+
+                // Signature Large Yellow Play / Pause Disc (56x56 pt)
+                Button {
+                    audioEngine.togglePlayPause()
+                } label: {
+                    ZStack {
+                        Circle()
+                            .fill(YMTheme.accent)
+                            .frame(width: 56, height: 56)
+                            .shadow(color: YMTheme.accent.opacity(audioEngine.isPlaying ? 0.45 : 0.2), radius: 12, y: 2)
+
+                        Image(systemName: audioEngine.isPlaying ? "pause.fill" : "play.fill")
+                            .font(.system(size: 22, weight: .bold))
+                            .foregroundColor(Color.black)
+                            .offset(x: audioEngine.isPlaying ? 0 : 2)
+                    }
+                }
+                .buttonStyle(.plain)
+                .help(audioEngine.isPlaying ? "Пауза" : "Воспроизведение")
+
+                // Next
+                Button {
+                    audioEngine.next()
+                } label: {
+                    Image(systemName: "forward.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(YMTheme.fg80)
+                }
+                .buttonStyle(.plain)
+                .help("Следующий трек")
+
+                // Flame (More Like This)
+                Button {
+                    audioEngine.applyWaveTuning(.moreLikeThis)
+                    isFlameActive = true
+                    showToast("Больше треков в стиле «\(track.displayTitle)»")
+                    Task {
+                        try? await Task.sleep(nanoseconds: 1_500_000_000)
+                        await MainActor.run { isFlameActive = false }
+                    }
+                } label: {
+                    Image(systemName: "flame.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(isFlameActive ? Color.orange : YMTheme.accent)
+                        .padding(10)
+                        .background(Circle().fill(Color.black.opacity(0.4)))
+                        .overlay(Circle().strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .help("Больше таких треков")
+            }
+            .padding(.top, 4)
+
+            // AI Insight Pill (At bottom of Hero)
+            HStack(spacing: 8) {
+                HStack(spacing: 4) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 10, weight: .bold))
+                    Text("AI")
+                        .font(.system(size: 10, weight: .black))
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(Capsule().fill(YMTheme.accent.opacity(0.2)))
+                .foregroundColor(YMTheme.accent)
+
+                Text(aiInsightText(for: track))
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(YMTheme.fg60)
+                    .lineLimit(1)
+            }
+            .padding(.bottom, 16)
+        }
+    }
+
+    // MARK: - Idle / Ready Wave Content (No Auto-Play)
+
+    @ViewBuilder
+    private var idleWaveContent: some View {
+        VStack(spacing: 18) {
+            Spacer()
+
+            // Giant Title
+            VStack(spacing: 6) {
+                Text("Моя волна")
+                    .font(.system(size: windowState.isCompactWidth ? 38 : 52, weight: .black, design: .default))
+                    .foregroundStyle(Color.white)
+                    .shadow(color: Color.black.opacity(0.7), radius: 10, y: 4)
+
+                Text("Бесконечный персональный поток музыки, который подстраивается под вас")
+                    .font(.system(size: 14))
+                    .foregroundStyle(YMTheme.fg60)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, 24)
+
+            // Prominent Play Disc
+            Button {
+                startWave(context: audioEngine.activeWaveContext, vibe: audioEngine.activeWaveVibe)
+            } label: {
+                HStack(spacing: 12) {
+                    ZStack {
+                        Circle()
+                            .fill(YMTheme.accent)
+                            .frame(width: 60, height: 60)
+                            .shadow(color: YMTheme.accent.opacity(0.4), radius: 14, y: 3)
+
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 24, weight: .bold))
+                            .foregroundColor(Color.black)
+                            .offset(x: 2)
+                    }
+
+                    Text("Слушать Мою волну")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(Color.white)
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 10)
+                .background(
+                    Capsule()
+                        .fill(Color.black.opacity(0.45))
+                        .overlay(Capsule().strokeBorder(YMTheme.accent.opacity(0.4), lineWidth: 1.5))
+                )
+            }
+            .buttonStyle(.plain)
+            .scaleEffect(waveOrbScale * 0.95)
+            .animation(.easeInOut(duration: 2.2).repeatForever(autoreverses: true), value: waveOrbScale)
+
+            Spacer()
+        }
+        .frame(minHeight: 360)
+    }
+
+    // MARK: - Vibe Presets Selector (Stylized Cards)
 
     private var vibePresetsSelector: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Характер звучания")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(YMTheme.fg80)
-                .padding(.horizontal, 24)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Характер звучания")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(YMTheme.fg)
+
+                Spacer()
+
+                // Diversity "Больше открытий" Button
+                Button {
+                    audioEngine.applyWaveTuning(.moreDiversity)
+                    showToast("Перенастройка волны: добавлено больше открытий")
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 12))
+                        Text("Встряхнуть поток")
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Capsule().fill(Color.white.opacity(0.08)))
+                    .foregroundColor(YMTheme.fg)
+                    .overlay(Capsule().strokeBorder(YMTheme.border, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .help("Встряхнуть и добавить больше неожиданных треков")
+            }
+            .padding(.horizontal, 24)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
                     ForEach(YMWaveVibePreset.allCases) { preset in
                         let isSelected = audioEngine.activeWaveVibe == preset
                         Button {
-                            guard audioEngine.activeWaveVibe != preset || !audioEngine.isWaveMode else { return }
                             audioEngine.activeWaveVibe = preset
-                            startWave(context: audioEngine.activeWaveContext, vibe: preset)
+                            if audioEngine.isWaveMode {
+                                startWave(context: audioEngine.activeWaveContext, vibe: preset)
+                            }
                             showToast("Характер волны: \(preset.title)")
                         } label: {
-                            HStack(spacing: 6) {
+                            HStack(spacing: 8) {
                                 Image(systemName: preset.iconName)
-                                    .font(.system(size: 12))
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundColor(vibeColor(for: preset))
+
                                 Text(preset.title)
-                                    .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
+                                    .font(.system(size: 13, weight: isSelected ? .bold : .medium))
+                                    .foregroundStyle(isSelected ? Color.black : YMTheme.fg)
                             }
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 8)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
                             .background(
                                 Capsule()
-                                    .fill(isSelected ? YMTheme.accent : Color.white.opacity(0.08))
+                                    .fill(isSelected ? YMTheme.accent : Color.white.opacity(0.07))
                             )
-                            .foregroundColor(isSelected ? .black : YMTheme.fg)
                             .overlay(
                                 Capsule()
-                                    .strokeBorder(isSelected ? Color.clear : YMTheme.border, lineWidth: 1)
+                                    .strokeBorder(isSelected ? YMTheme.accent : YMTheme.border, lineWidth: 1)
                             )
-                            .scaleEffect(isSelected ? 1.02 : 1.0)
+                            .shadow(color: isSelected ? YMTheme.accent.opacity(0.25) : Color.clear, radius: 8)
+                            .scaleEffect(isSelected ? 1.03 : 1.0)
                         }
                         .buttonStyle(.plain)
                     }
-
-                    // Diversity Button
-                    Button {
-                        audioEngine.applyWaveTuning(.moreDiversity)
-                        showToast("Перенастройка волны: добавлено больше разнообразия")
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "sparkles")
-                                .font(.system(size: 12))
-                            Text("Больше открытий")
-                                .font(.system(size: 13, weight: .medium))
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-                        .background(Capsule().fill(Color.white.opacity(0.08)))
-                        .foregroundColor(YMTheme.fg)
-                        .overlay(Capsule().strokeBorder(YMTheme.border, lineWidth: 1))
-                    }
-                    .buttonStyle(.plain)
-                    .help("Добавить больше неожиданных открытий")
                 }
                 .padding(.horizontal, 24)
+                .padding(.vertical, 4)
             }
+        }
+    }
+
+    private func vibeColor(for preset: YMWaveVibePreset) -> Color {
+        switch preset {
+        case .defaultWave: return Color(red: 255 / 255, green: 215 / 255, blue: 0)
+        case .energetic: return Color(red: 0, green: 220 / 255, blue: 140 / 255)
+        case .unfamiliar: return Color(red: 255 / 255, green: 145 / 255, blue: 0)
+        case .familiar: return Color(red: 255 / 255, green: 210 / 255, blue: 0)
+        case .popular: return Color(red: 255 / 255, green: 70 / 255, blue: 70 / 255)
+        case .calm: return Color(red: 170 / 255, green: 110 / 255, blue: 245 / 255)
+        }
+    }
+
+    // MARK: - Upcoming Queue Section
+
+    @ViewBuilder
+    private var upcomingQueueSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Далее в волне")
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundStyle(YMTheme.fg)
+
+                    Text("Треки, подобранные алгоритмом на основе ваших предпочтений")
+                        .font(.caption)
+                        .foregroundStyle(YMTheme.fg40)
+                }
+
+                Spacer()
+
+                if isLoadingMoreWave {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                }
+            }
+            .padding(.horizontal, 24)
+
+            if displayedWaveTracks.isEmpty && isLoadingWave {
+                VStack(spacing: 14) {
+                    ProgressView()
+                        .scaleEffect(1.2)
+                    Text("Подбираем музыку для вашей волны...")
+                        .font(.caption)
+                        .foregroundStyle(YMTheme.fg40)
+                }
+                .frame(maxWidth: .infinity, minHeight: 180)
+            } else if !displayedWaveTracks.isEmpty {
+                TrackTableView(
+                    tracks: displayedWaveTracks,
+                    onPlayTrack: { track in
+                        if let idx = displayedWaveTracks.firstIndex(where: { $0.id == track.id }) {
+                            audioEngine.playTrack(at: idx)
+                        }
+                    },
+                    onLoadMore: {
+                        Task {
+                            await loadMoreTracks()
+                        }
+                    }
+                )
+                .padding(.horizontal, 14)
+            }
+        }
+    }
+
+    // MARK: - AI Context Insights
+
+    private func aiInsightText(for track: YMTrack) -> String {
+        switch audioEngine.activeWaveVibe {
+        case .energetic:
+            return "Бодрый ритм • Отлично подходит для активных действий"
+        case .calm:
+            return "Спокойная атмосфера • Плавное звучание для отдыха"
+        case .unfamiliar:
+            return "Свежее открытие • Рекомендовано на основе ваших вкусов"
+        case .familiar:
+            return "Проверенный трек • На основе вашей медиатеки"
+        case .popular:
+            return "Популярный трек • Сейчас слушают многие в Яндекс Музыке"
+        case .defaultWave:
+            return "Специально для вас • Алгоритм Моей волны"
+        }
+    }
+
+    // MARK: - Audio Helpers
+
+    private func toggleMute() {
+        if isMuted {
+            audioEngine.volume = previousVolume > 0 ? previousVolume : 0.5
+            isMuted = false
+        } else {
+            previousVolume = audioEngine.volume
+            audioEngine.volume = 0
+            isMuted = true
         }
     }
 

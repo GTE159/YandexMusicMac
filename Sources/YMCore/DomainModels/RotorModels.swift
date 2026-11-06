@@ -143,36 +143,44 @@ public struct YMRotorFeedbackEvent: Codable, Sendable {
 
 public enum YMWaveVibePreset: String, CaseIterable, Identifiable, Sendable {
     case defaultWave = "default"
-    case familiar = "favorite"
+    case energetic = "energetic"
     case unfamiliar = "discover"
+    case familiar = "favorite"
     case popular = "popular"
+    case calm = "calm"
 
     public var id: String { rawValue }
 
     public var title: String {
         switch self {
         case .defaultWave: return "По умолчанию"
-        case .familiar: return "Знакомое"
+        case .energetic: return "Энергичное"
         case .unfamiliar: return "Незнакомое"
+        case .familiar: return "Знакомое"
         case .popular: return "Популярное"
+        case .calm: return "Спокойное"
         }
     }
 
     public var iconName: String {
         switch self {
         case .defaultWave: return "waveform.path.ecg"
-        case .familiar: return "heart.circle"
+        case .energetic: return "bolt.fill"
         case .unfamiliar: return "sparkles"
-        case .popular: return "flame"
+        case .familiar: return "heart.circle"
+        case .popular: return "flame.fill"
+        case .calm: return "moon.stars.fill"
         }
     }
 
     public var seedParameter: String? {
         switch self {
         case .defaultWave: return nil
-        case .familiar: return "settingDiversity:favorite"
+        case .energetic: return "mood:energize"
         case .unfamiliar: return "settingDiversity:discover"
+        case .familiar: return "settingDiversity:favorite"
         case .popular: return "settingDiversity:popular"
+        case .calm: return "mood:calm"
         }
     }
 }

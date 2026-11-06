@@ -118,9 +118,7 @@ private struct ModernTrackRow: View {
             // Track Number / Playing indicator
             HStack(spacing: 0) {
                 if isPlaying {
-                    Image(systemName: "waveform")
-                        .foregroundColor(YMTheme.accent)
-                        .font(.system(size: 13, weight: .bold))
+                    YMPlayingEqualizerView(color: YMTheme.accent, barWidth: 2, maxHeight: 13, isPlaying: audioEngine.isPlaying)
                         .frame(width: 36, alignment: .center)
                 } else {
                     Text("\(index + 1)")
@@ -130,7 +128,7 @@ private struct ModernTrackRow: View {
                 }
             }
 
-            // Cover thumbnail with hover play button
+            // Cover thumbnail with hover play button & animated playing state
             ZStack {
                 CachedCoverImage(
                     coverUri: track.effectiveCoverUri,
@@ -139,7 +137,25 @@ private struct ModernTrackRow: View {
                     cornerRadius: 6
                 )
 
-                if isHovered && !isPlaying {
+                if isPlaying {
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.black.opacity(0.55))
+                        .frame(width: 40, height: 40)
+
+                    if isHovered {
+                        Button {
+                            audioEngine.togglePlayPause()
+                        } label: {
+                            Image(systemName: audioEngine.isPlaying ? "pause.fill" : "play.fill")
+                                .foregroundColor(YMTheme.accent)
+                                .font(.system(size: 14, weight: .bold))
+                        }
+                        .buttonStyle(.plain)
+                        .help(audioEngine.isPlaying ? "Пауза" : "Воспроизвести")
+                    } else {
+                        YMPlayingEqualizerView(color: YMTheme.accent, barWidth: 2.5, maxHeight: 15, isPlaying: audioEngine.isPlaying)
+                    }
+                } else if isHovered {
                     Button {
                         onPlay()
                     } label: {
@@ -153,6 +169,7 @@ private struct ModernTrackRow: View {
                         }
                     }
                     .buttonStyle(.plain)
+                    .help("Воспроизвести трек")
                 }
             }
             .frame(width: 40, height: 40)
