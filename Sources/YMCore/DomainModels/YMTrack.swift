@@ -10,6 +10,8 @@ public struct YMTrack: Codable, Sendable, Identifiable, Hashable {
     public let albums: [YMAlbum]
     public let coverUri: String?
     public let realId: String?
+    public let lyricsAvailable: Bool?
+    public let lyricsInfo: YMLyricsInfo?
     public let isPlaceholder: Bool
     public let isSpacer: Bool
 
@@ -23,6 +25,8 @@ public struct YMTrack: Codable, Sendable, Identifiable, Hashable {
         albums: [YMAlbum] = [],
         coverUri: String? = nil,
         realId: String? = nil,
+        lyricsAvailable: Bool? = nil,
+        lyricsInfo: YMLyricsInfo? = nil,
         isPlaceholder: Bool = false,
         isSpacer: Bool = false
     ) {
@@ -35,6 +39,8 @@ public struct YMTrack: Codable, Sendable, Identifiable, Hashable {
         self.albums = albums
         self.coverUri = coverUri
         self.realId = realId
+        self.lyricsAvailable = lyricsAvailable
+        self.lyricsInfo = lyricsInfo
         self.isPlaceholder = isPlaceholder
         self.isSpacer = isSpacer
     }
@@ -50,6 +56,8 @@ public struct YMTrack: Codable, Sendable, Identifiable, Hashable {
             albums: [],
             coverUri: nil,
             realId: nil,
+            lyricsAvailable: nil,
+            lyricsInfo: nil,
             isPlaceholder: true,
             isSpacer: false
         )
@@ -66,6 +74,8 @@ public struct YMTrack: Codable, Sendable, Identifiable, Hashable {
             albums: [],
             coverUri: nil,
             realId: nil,
+            lyricsAvailable: nil,
+            lyricsInfo: nil,
             isPlaceholder: false,
             isSpacer: true
         )
@@ -81,6 +91,10 @@ public struct YMTrack: Codable, Sendable, Identifiable, Hashable {
         case albums
         case coverUri
         case realId
+        case lyricsAvailable
+        case lyricsAvailableKebab = "lyrics-available"
+        case lyricsInfo
+        case lyricsInfoKebab = "lyrics-info"
     }
 
     public init(from decoder: Decoder) throws {
@@ -107,6 +121,10 @@ public struct YMTrack: Codable, Sendable, Identifiable, Hashable {
         self.albums = rawAlbums.first.map { [$0] } ?? []
         self.coverUri = try? container.decodeIfPresent(String.self, forKey: .coverUri)
         self.realId = FlexibleIDDecoder.decodeStringIfPresent(from: container, forKey: .realId)
+        self.lyricsAvailable = (try? container.decodeIfPresent(Bool.self, forKey: .lyricsAvailable))
+            ?? (try? container.decodeIfPresent(Bool.self, forKey: .lyricsAvailableKebab))
+        self.lyricsInfo = (try? container.decodeIfPresent(YMLyricsInfo.self, forKey: .lyricsInfo))
+            ?? (try? container.decodeIfPresent(YMLyricsInfo.self, forKey: .lyricsInfoKebab))
         self.isPlaceholder = false
         self.isSpacer = false
     }
@@ -122,6 +140,8 @@ public struct YMTrack: Codable, Sendable, Identifiable, Hashable {
         try container.encode(albums, forKey: .albums)
         try container.encodeIfPresent(coverUri, forKey: .coverUri)
         try container.encodeIfPresent(realId, forKey: .realId)
+        try container.encodeIfPresent(lyricsAvailable, forKey: .lyricsAvailable)
+        try container.encodeIfPresent(lyricsInfo, forKey: .lyricsInfo)
     }
 
     // MARK: - Computed Convenience Properties
@@ -172,7 +192,51 @@ public struct YMTrack: Codable, Sendable, Identifiable, Hashable {
         return String(format: "%d:%02d", minutes, seconds)
     }
 
+    /// Whether lyrics are available for this track
+    public var hasLyrics: Bool {
+        if let available = lyricsAvailable {
+            return available
+        }
+        if let info = lyricsInfo {
+            return info.hasAvailableTextLyrics == true || info.hasAvailableSyncLyrics == true
+        }
+        return false
+    }
+
     public func coverURL(size: YMCoverSize = .medium) -> URL? {
         YMCoverURLBuilder.buildURL(from: effectiveCoverUri, size: size)
+    }
+}
+
+// MARK: - Lyrics Info
+
+public struct YMLyricsInfo: Codable, Sendable, Hashable {
+    public let hasAvailableSyncLyrics: Bool?
+    public let hasAvailableTextLyrics: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case hasAvailableSyncLyrics
+        case hasAvailableTextLyrics
+        case hasAvailableSyncLyricsKebab = "has-available-sync-lyrics"
+        case hasAvailableTextLyricsKebab = "has-available-text-lyrics"
+    }
+
+    public init(hasAvailableSyncLyrics: Bool? = nil, hasAvailableTextLyrics: Bool? = nil) {
+        self.hasAvailableSyncLyrics = hasAvailableSyncLyrics
+        self.hasAvailableTextLyrics = hasAvailableTextLyrics
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.hasAvailableSyncLyrics = (try? container.decodeIfPresent(Bool.self, forKey: .hasAvailableSyncLyrics))
+            ?? (try? container.decodeIfPresent(Bool.self, forKey: .hasAvailableSyncLyricsKebab))
+        self.hasAvailableTextLyrics = (try? container.decodeIfPresent(Bool.self, forKey: .hasAvailableTextLyrics))
+            ?? (try? container.decodeIfPresent(Bool.self, forKey: .hasAvailableTextLyricsKebab))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(hasAvailableSyncLyrics, forKey: .hasAvailableSyncLyrics)
+        try container.encodeIfPresent(hasAvailableTextLyrics, forKey: .hasAvailableTextLyrics)
     }
 }

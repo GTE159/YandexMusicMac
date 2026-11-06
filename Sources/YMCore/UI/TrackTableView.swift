@@ -112,21 +112,15 @@ private struct ModernTrackRow: View {
     @UIState private var audioEngine = AudioPlayerEngine.shared
     @UIState private var coordinator = NavigationCoordinator.shared
     @UIState private var isHovered = false
+    @UIState private var hoverTask: Task<Void, Never>? = nil
 
     var body: some View {
         HStack(spacing: 12) {
-            // Track Number / Playing indicator
-            HStack(spacing: 0) {
-                if isPlaying {
-                    YMPlayingEqualizerView(color: YMTheme.accent, barWidth: 2, maxHeight: 13, isPlaying: audioEngine.isPlaying)
-                        .frame(width: 36, alignment: .center)
-                } else {
-                    Text("\(index + 1)")
-                        .font(.system(size: 12, weight: .medium).monospacedDigit())
-                        .foregroundStyle(YMTheme.fg40)
-                        .frame(width: 36, alignment: .center)
-                }
-            }
+            // Track Number (clean & simple, animation is on the cover only)
+            Text("\(index + 1)")
+                .font(.system(size: 12, weight: isPlaying ? .bold : .medium).monospacedDigit())
+                .foregroundStyle(isPlaying ? YMTheme.accent : YMTheme.fg40)
+                .frame(width: 36, alignment: .center)
 
             // Cover thumbnail with hover play button & animated playing state
             ZStack {
@@ -258,7 +252,25 @@ private struct ModernTrackRow: View {
                 .fill(isPlaying ? Color.white.opacity(0.08) : (isHovered ? Color.white.opacity(0.05) : Color.clear))
         )
         .contentShape(Rectangle())
-        .onHover { isHovered = $0 }
+        .onHover { hovering in
+            hoverTask?.cancel()
+            if hovering {
+                hoverTask = Task {
+                    // Debounce: when scrolling, row leaves cursor before debounce finishes, preventing flying hover boxes
+                    try? await Task.sleep(nanoseconds: 90_000_000)
+                    guard !Task.isCancelled else { return }
+                    await MainActor.run {
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            isHovered = true
+                        }
+                    }
+                }
+            } else {
+                withAnimation(.easeOut(duration: 0.12)) {
+                    isHovered = false
+                }
+            }
+        }
         .onTapGesture(count: 2) {
             onPlay()
         }

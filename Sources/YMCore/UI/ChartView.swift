@@ -175,6 +175,7 @@ private struct ChartTrackRow: View {
     @UIState private var audioEngine = AudioPlayerEngine.shared
     @UIState private var coordinator = NavigationCoordinator.shared
     @UIState private var isHovered = false
+    @UIState private var hoverTask: Task<Void, Never>? = nil
 
     private var position: Int {
         item.chart?.position ?? (index + 1)
@@ -197,7 +198,24 @@ private struct ChartTrackRow: View {
                 .fill(isPlaying ? Color.white.opacity(0.08) : (isHovered ? Color.white.opacity(0.05) : Color.clear))
         )
         .contentShape(Rectangle())
-        .onHover { isHovered = $0 }
+        .onHover { hovering in
+            hoverTask?.cancel()
+            if hovering {
+                hoverTask = Task {
+                    try? await Task.sleep(nanoseconds: 90_000_000)
+                    guard !Task.isCancelled else { return }
+                    await MainActor.run {
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            isHovered = true
+                        }
+                    }
+                }
+            } else {
+                withAnimation(.easeOut(duration: 0.12)) {
+                    isHovered = false
+                }
+            }
+        }
         .onTapGesture(count: 2) {
             onPlay()
         }
@@ -209,18 +227,15 @@ private struct ChartTrackRow: View {
     @ViewBuilder
     private var rankView: some View {
         HStack(spacing: 3) {
-            if isPlaying {
-                YMPlayingEqualizerView(color: YMTheme.accent, barWidth: 2, maxHeight: 12, isPlaying: audioEngine.isPlaying)
-                    .frame(width: 22, alignment: .center)
-            } else if position <= 3 {
+            if position <= 3 {
                 Text("\(position)")
                     .font(.system(size: 14, weight: .bold).monospacedDigit())
                     .foregroundColor(YMTheme.accent)
                     .frame(width: 22, alignment: .trailing)
             } else {
                 Text("\(position)")
-                    .font(.system(size: 13, weight: .medium).monospacedDigit())
-                    .foregroundStyle(YMTheme.fg60)
+                    .font(.system(size: 13, weight: isPlaying ? .bold : .medium).monospacedDigit())
+                    .foregroundStyle(isPlaying ? YMTheme.accent : YMTheme.fg60)
                     .frame(width: 22, alignment: .trailing)
             }
 

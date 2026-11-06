@@ -37,15 +37,21 @@ public struct PlayerBarView: View {
         .frame(height: 76)
         .frame(maxWidth: .infinity)
         .background {
-            ZStack {
-                YMTheme.playerBg.opacity(0.92)
+            ZStack(alignment: .top) {
                 VisualEffectBlur(material: .headerView, blendingMode: .withinWindow)
+
+                LinearGradient(
+                    colors: [
+                        YMTheme.playerBg.opacity(0.82),
+                        YMTheme.playerBg.opacity(0.95),
+                        YMTheme.playerBg
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
             }
         }
-        .overlay(alignment: .top) {
-            YMTheme.border
-                .frame(height: 1)
-        }
+        .shadow(color: Color.black.opacity(0.7), radius: 18, x: 0, y: -6)
         .sheet(isPresented: $coordinator.isLyricsPresented) {
             LyricsSheetView(track: audioEngine.currentTrack)
         }
@@ -287,19 +293,20 @@ public struct PlayerBarView: View {
     @ViewBuilder
     private var rightControlsSection: some View {
         HStack(spacing: 12) {
-            // Lyrics Button
-            Button {
-                coordinator.isLyricsPresented = true
-            } label: {
-                Image(systemName: "quote.bubble.fill")
-                    .font(.system(size: 12))
-                    .foregroundStyle(coordinator.isLyricsPresented ? YMTheme.accent : YMTheme.fg60)
-                    .padding(6)
-                    .background(Circle().fill(coordinator.isLyricsPresented ? YMTheme.accent.opacity(0.18) : Color.white.opacity(0.08)))
+            // Lyrics Button (only shown if lyrics are available)
+            if let track = audioEngine.currentTrack, track.hasLyrics {
+                Button {
+                    coordinator.isLyricsPresented = true
+                } label: {
+                    Image(systemName: "quote.bubble.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(coordinator.isLyricsPresented ? YMTheme.accent : YMTheme.fg60)
+                        .padding(6)
+                        .background(Circle().fill(coordinator.isLyricsPresented ? YMTheme.accent.opacity(0.18) : Color.white.opacity(0.08)))
+                }
+                .buttonStyle(.plain)
+                .help("Показать текст песни")
             }
-            .buttonStyle(.plain)
-            .disabled(audioEngine.currentTrack == nil)
-            .help("Показать текст песни")
 
             // Fixed-Width Quality Badge Menu (NO icon, strictly constant width to prevent UI jumping)
             AudioQualityMenu(audioEngine: audioEngine)
