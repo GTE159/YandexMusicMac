@@ -18,7 +18,7 @@ public struct YMSlider: View {
         value: Binding<Double>,
         in range: ClosedRange<Double> = 0...1,
         activeColor: Color = YMTheme.accent,
-        trackColor: Color = Color.white.opacity(0.12),
+        trackColor: Color = YMTheme.surfaceComponentHover,
         height: CGFloat = 4,
         onEditingChanged: ((Bool) -> Void)? = nil
     ) {
@@ -59,9 +59,10 @@ public struct YMSlider: View {
                 // Knob Handle (expands on hover/drag)
                 if isHovered || isDragging {
                     Circle()
-                        .fill(Color.white)
+                        .fill(Color(nsColor: .white))
+                        .overlay(Circle().strokeBorder(YMTheme.borderHover, lineWidth: 0.5))
                         .frame(width: 10, height: 10)
-                        .shadow(color: Color.black.opacity(0.4), radius: 3, x: 0, y: 1)
+                        .shadow(color: YMTheme.shadowColor, radius: 3, x: 0, y: 1)
                         .offset(x: max(0, min(width - 10, (width * normalizedProgress) - 5)))
                         .transition(.scale.combined(with: .opacity))
                 }

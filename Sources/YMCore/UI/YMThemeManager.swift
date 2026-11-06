@@ -16,6 +16,14 @@ public enum YMAppTheme: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    public var subtitle: String {
+        switch self {
+        case .system: return "Автоматически повторяет оформление macOS"
+        case .dark: return "Фирменный глубокий тёмный интерфейс"
+        case .light: return "Мягкая нейтральная тема в тёплых тонах"
+        }
+    }
+
     public var iconName: String {
         switch self {
         case .system: return "circle.righthalf.filled"
@@ -56,6 +64,7 @@ public final class YMThemeManager {
         } else {
             self.currentTheme = .dark
         }
+        updateWindowAppearance()
     }
 
     public func setTheme(_ theme: YMAppTheme) {
@@ -63,15 +72,15 @@ public final class YMThemeManager {
     }
 
     public func updateWindowAppearance() {
+        let appKitAppearance: NSAppearance? = switch currentTheme {
+        case .system: nil
+        case .dark: NSAppearance(named: .darkAqua)
+        case .light: NSAppearance(named: .aqua)
+        }
+
+        NSApp.appearance = appKitAppearance
         for window in NSApp.windows where !(window is NSPanel) {
-            switch currentTheme {
-            case .system:
-                window.appearance = nil
-            case .dark:
-                window.appearance = NSAppearance(named: .darkAqua)
-            case .light:
-                window.appearance = NSAppearance(named: .aqua)
-            }
+            window.appearance = appKitAppearance
         }
     }
 }

@@ -70,9 +70,9 @@ public struct SearchView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color.white.opacity(0.06))
-                    .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(YMTheme.border, lineWidth: 1))
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(YMTheme.surface)
+                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(YMTheme.border, lineWidth: 1))
             )
             .padding(.horizontal, 24)
             .padding(.top, 16)
@@ -134,9 +134,9 @@ public struct SearchView: View {
                                         .padding(.horizontal, 14)
                                         .padding(.vertical, 12)
                                         .background(
-                                            RoundedRectangle(cornerRadius: 10)
-                                                .fill(Color.white.opacity(0.05))
-                                                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(YMTheme.border, lineWidth: 1))
+                                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                                .fill(YMTheme.surface)
+                                                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(YMTheme.border, lineWidth: 1))
                                         )
                                         .ymCardHover(cornerRadius: 10, scale: 1.03)
                                     }

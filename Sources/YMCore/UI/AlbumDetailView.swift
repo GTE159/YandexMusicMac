@@ -33,7 +33,7 @@ public struct AlbumDetailView: View {
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
-                    .background(Capsule().fill(Color.white.opacity(0.08)))
+                    .background(Capsule().fill(YMTheme.surfaceComponent))
                     .overlay(Capsule().strokeBorder(YMTheme.border, lineWidth: 1))
                 }
                 .buttonStyle(.plain)

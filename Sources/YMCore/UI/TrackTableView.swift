@@ -249,7 +249,7 @@ private struct ModernTrackRow: View {
         .padding(.horizontal, 10)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(isPlaying ? Color.white.opacity(0.08) : (isHovered ? Color.white.opacity(0.05) : Color.clear))
+                .fill(isPlaying ? YMTheme.surfaceComponentHover : (isHovered ? YMTheme.surfaceComponent : Color.clear))
         )
         .contentShape(Rectangle())
         .onHover { hovering in

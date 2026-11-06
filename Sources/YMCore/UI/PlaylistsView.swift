@@ -170,7 +170,7 @@ public struct PlaylistsView: View {
                         }
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
-                        .background(Capsule().fill(Color.white.opacity(0.08)))
+                        .background(Capsule().fill(YMTheme.surfaceComponent))
                         .overlay(Capsule().strokeBorder(YMTheme.border, lineWidth: 1))
                     }
                     .buttonStyle(.plain)
@@ -271,9 +271,9 @@ public struct PlaylistsView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
                 .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.white.opacity(0.06))
-                        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(YMTheme.border, lineWidth: 1))
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(YMTheme.surface)
+                        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(YMTheme.border, lineWidth: 1))
                 )
                 .padding(.horizontal, 24)
                 .padding(.bottom, 10)

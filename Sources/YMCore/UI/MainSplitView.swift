@@ -152,7 +152,7 @@ public struct MainSplitView: View {
                             .font(.system(size: 13))
                             .foregroundStyle(YMTheme.fg40)
                             .padding(6)
-                            .background(Circle().fill(Color.white.opacity(0.04)))
+                            .background(Circle().fill(YMTheme.surfaceComponent))
                     }
                     .buttonStyle(.plain)
                     .help("Выйти из аккаунта")
@@ -211,7 +211,7 @@ public struct MainSplitView: View {
                         .padding(.vertical, 2)
                         .background(
                             Capsule()
-                                .fill(badgeColor == YMTheme.accent ? YMTheme.accent.opacity(0.18) : Color.white.opacity(0.08))
+                                .fill(badgeColor == YMTheme.accent ? YMTheme.accent.opacity(0.18) : YMTheme.surfaceComponent)
                         )
                         .foregroundStyle(badgeColor)
                 }
@@ -220,7 +220,11 @@ public struct MainSplitView: View {
             .padding(.vertical, 8)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(isSelected ? Color.white.opacity(0.12) : Color.clear)
+                    .fill(isSelected ? YMTheme.surfaceComponentHover : Color.clear)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(isSelected ? YMTheme.border : Color.clear, lineWidth: 1)
+                    )
             )
             .contentShape(Rectangle())
         }

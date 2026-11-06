@@ -35,7 +35,7 @@ public struct ArtistDetailView: View {
                         }
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
-                        .background(Capsule().fill(Color.white.opacity(0.08)))
+                        .background(Capsule().fill(YMTheme.surfaceComponent))
                         .overlay(Capsule().strokeBorder(YMTheme.border, lineWidth: 1))
                     }
                     .buttonStyle(.plain)
@@ -236,7 +236,7 @@ public struct ArtistDetailView: View {
                                 .padding(16)
                                 .background(
                                     RoundedRectangle(cornerRadius: YMTheme.cornerRadiusMedium)
-                                        .fill(Color.white.opacity(0.04))
+                                        .fill(YMTheme.surface)
                                         .overlay(RoundedRectangle(cornerRadius: YMTheme.cornerRadiusMedium).strokeBorder(YMTheme.border, lineWidth: 1))
                                 )
                         }

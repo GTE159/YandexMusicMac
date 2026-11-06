@@ -58,7 +58,7 @@ public struct LyricsSheetView: View {
             }
             .padding(.horizontal, 24)
             .padding(.vertical, 16)
-            .background(Color.white.opacity(0.04))
+            .background(YMTheme.surface)
 
             Divider()
 

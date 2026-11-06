@@ -32,26 +32,60 @@ public struct SettingsView: View {
 
                 // Section 0: Appearance & Theme
                 settingsCard(title: "Внешний вид") {
-                    HStack(spacing: 16) {
-                        Text("Тема оформления:")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(YMTheme.fg80)
-
-                        Picker("", selection: Binding(
-                            get: { themeManager.currentTheme },
-                            set: { themeManager.setTheme($0) }
-                        )) {
-                            ForEach(YMAppTheme.allCases) { theme in
-                                HStack {
-                                    Image(systemName: theme.iconName)
-                                    Text(theme.title)
+                    VStack(spacing: 8) {
+                        ForEach(YMAppTheme.allCases) { theme in
+                            let isSelected = themeManager.currentTheme == theme
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.18)) {
+                                    themeManager.setTheme(theme)
                                 }
-                                .tag(theme)
+                            } label: {
+                                HStack(spacing: 12) {
+                                    Image(systemName: theme.iconName)
+                                        .font(.system(size: 15, weight: .semibold))
+                                        .foregroundStyle(isSelected ? YMTheme.accent : YMTheme.fg60)
+                                        .frame(width: 24, height: 24)
+
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(theme.title)
+                                            .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
+                                            .foregroundStyle(YMTheme.fg)
+
+                                        Text(theme.subtitle)
+                                            .font(.system(size: 11))
+                                            .foregroundStyle(YMTheme.fg40)
+                                    }
+
+                                    Spacer()
+
+                                    ZStack {
+                                        Circle()
+                                            .strokeBorder(isSelected ? YMTheme.accent : YMTheme.border, lineWidth: 1.5)
+                                            .frame(width: 18, height: 18)
+
+                                        if isSelected {
+                                            Circle()
+                                                .fill(YMTheme.accent)
+                                                .frame(width: 10, height: 10)
+                                        }
+                                    }
+                                }
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 10)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .fill(isSelected ? YMTheme.surfaceComponentHover : Color.clear)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                                .strokeBorder(isSelected ? YMTheme.borderHover : Color.clear, lineWidth: 1)
+                                        )
+                                )
+                                .contentShape(Rectangle())
                             }
+                            .buttonStyle(.plain)
                         }
-                        .pickerStyle(.segmented)
-                        .frame(width: 280)
                     }
+                    .frame(maxWidth: 440)
                 }
 
                 // Section 1: User Account Card
@@ -216,9 +250,10 @@ public struct SettingsView: View {
             .padding(18)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color.white.opacity(0.04))
-                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(YMTheme.border, lineWidth: 1))
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(YMTheme.surface)
+                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(YMTheme.border, lineWidth: 1))
+                    .shadow(color: YMTheme.shadowColor, radius: 4, y: 1)
             )
         }
     }

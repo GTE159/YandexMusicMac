@@ -54,8 +54,9 @@ public struct MyWaveView: View {
                     .padding(.vertical, 8)
                     .background(
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(Color.white.opacity(0.08))
+                            .fill(YMTheme.surface)
                             .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(YMTheme.border, lineWidth: 1))
+                            .shadow(color: YMTheme.shadowColor, radius: 8, y: 2)
                     )
                     .padding(.horizontal, 24)
                     .transition(.move(edge: .top).combined(with: .opacity))
@@ -157,20 +158,12 @@ public struct MyWaveView: View {
             ZStack {
                 // Subtle ambient gradient bleed (low opacity, soft radius)
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(0.04),
-                                Color.white.opacity(0.02)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+                    .fill(YMTheme.surface)
                     .overlay(
                         RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
+                            .strokeBorder(YMTheme.border, lineWidth: 1)
                     )
+                    .shadow(color: YMTheme.shadowColor, radius: 10, y: 3)
 
                 if let track = audioEngine.currentTrack, audioEngine.isWaveMode {
                     activeTrackBanner(track: track)
@@ -267,7 +260,7 @@ public struct MyWaveView: View {
                         .font(.system(size: 13))
                         .foregroundStyle(YMTheme.fg60)
                         .padding(8)
-                        .background(Circle().fill(Color.white.opacity(0.06)))
+                        .background(Circle().fill(YMTheme.surfaceComponent))
                 }
                 .buttonStyle(.plain)
                 .help("Меньше таких треков")
@@ -290,9 +283,9 @@ public struct MyWaveView: View {
                 } label: {
                     ZStack {
                         Circle()
-                            .fill(YMTheme.accent)
+                            .fill(YMTheme.accentFill)
                             .frame(width: 44, height: 44)
-                            .shadow(color: YMTheme.accent.opacity(audioEngine.isPlaying ? 0.4 : 0.15), radius: 8, y: 2)
+                            .shadow(color: YMTheme.accentFill.opacity(audioEngine.isPlaying ? 0.35 : 0.15), radius: 8, y: 2)
 
                         Image(systemName: audioEngine.isPlaying ? "pause.fill" : "play.fill")
                             .font(.system(size: 17, weight: .bold))
@@ -329,7 +322,7 @@ public struct MyWaveView: View {
                         .font(.system(size: 13))
                         .foregroundStyle(isFlameActive ? Color.orange : YMTheme.accent)
                         .padding(8)
-                        .background(Circle().fill(Color.white.opacity(0.06)))
+                        .background(Circle().fill(YMTheme.surfaceComponent))
                 }
                 .buttonStyle(.plain)
                 .help("Больше таких треков")
@@ -344,7 +337,7 @@ public struct MyWaveView: View {
                         .font(.system(size: 13))
                         .foregroundColor(likesService.isLiked(trackId: track.id) ? YMTheme.heartRed : YMTheme.fg60)
                         .padding(8)
-                        .background(Circle().fill(Color.white.opacity(0.06)))
+                        .background(Circle().fill(YMTheme.surfaceComponent))
                 }
                 .buttonStyle(.plain)
                 .help("Мне нравится")
@@ -360,7 +353,7 @@ public struct MyWaveView: View {
         HStack(spacing: 16) {
             ZStack {
                 Circle()
-                    .fill(Color.white.opacity(0.06))
+                    .fill(YMTheme.surfaceComponent)
                     .frame(width: 58, height: 58)
 
                 Image(systemName: "waveform.path.ecg")
@@ -419,7 +412,7 @@ public struct MyWaveView: View {
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
-                    .background(Capsule().fill(Color.white.opacity(0.06)))
+                    .background(Capsule().fill(YMTheme.surfaceComponent))
                     .foregroundColor(YMTheme.fg60)
                 }
                 .buttonStyle(.plain)
@@ -452,11 +445,11 @@ public struct MyWaveView: View {
                             .padding(.vertical, 8)
                             .background(
                                 Capsule()
-                                    .fill(isSelected ? YMTheme.accent : Color.white.opacity(0.06))
+                                    .fill(isSelected ? YMTheme.accentFill : YMTheme.surfaceComponent)
                             )
                             .overlay(
                                 Capsule()
-                                    .strokeBorder(isSelected ? YMTheme.accent : Color.white.opacity(0.08), lineWidth: 1)
+                                    .strokeBorder(isSelected ? YMTheme.accentFill : YMTheme.border, lineWidth: 1)
                             )
                         }
                         .buttonStyle(.plain)
@@ -469,12 +462,12 @@ public struct MyWaveView: View {
 
     private func vibeColor(for preset: YMWaveVibePreset) -> Color {
         switch preset {
-        case .defaultWave: return Color(red: 255 / 255, green: 215 / 255, blue: 0)
-        case .energetic: return Color(red: 0, green: 220 / 255, blue: 140 / 255)
-        case .unfamiliar: return Color(red: 255 / 255, green: 145 / 255, blue: 0)
-        case .familiar: return Color(red: 255 / 255, green: 210 / 255, blue: 0)
-        case .popular: return Color(red: 255 / 255, green: 70 / 255, blue: 70 / 255)
-        case .calm: return Color(red: 170 / 255, green: 110 / 255, blue: 245 / 255)
+        case .defaultWave: return YMTheme.accent
+        case .energetic: return Color(red: 0, green: 190 / 255, blue: 125 / 255)
+        case .unfamiliar: return Color(red: 235 / 255, green: 130 / 255, blue: 0)
+        case .familiar: return YMTheme.accent
+        case .popular: return Color(red: 235 / 255, green: 60 / 255, blue: 60 / 255)
+        case .calm: return Color(red: 150 / 255, green: 90 / 255, blue: 230 / 255)
         }
     }
 

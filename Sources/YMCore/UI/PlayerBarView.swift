@@ -42,8 +42,8 @@ public struct PlayerBarView: View {
 
                 LinearGradient(
                     colors: [
-                        YMTheme.playerBg.opacity(0.82),
-                        YMTheme.playerBg.opacity(0.95),
+                        YMTheme.playerBg.opacity(0.85),
+                        YMTheme.playerBg.opacity(0.96),
                         YMTheme.playerBg
                     ],
                     startPoint: .top,
@@ -51,7 +51,11 @@ public struct PlayerBarView: View {
                 )
             }
         }
-        .shadow(color: Color.black.opacity(0.7), radius: 18, x: 0, y: -6)
+        .overlay(alignment: .top) {
+            YMTheme.border
+                .frame(height: 1)
+        }
+        .shadow(color: YMTheme.playerBarShadow, radius: 10, x: 0, y: -4)
         .sheet(isPresented: $coordinator.isLyricsPresented) {
             LyricsSheetView(track: audioEngine.currentTrack)
         }
@@ -116,13 +120,13 @@ public struct PlayerBarView: View {
                         .font(.system(size: 13))
                         .foregroundColor(likesService.isLiked(trackId: track.id) ? YMTheme.heartRed : YMTheme.fg60)
                         .padding(6)
-                        .background(Circle().fill(Color.white.opacity(0.08)))
+                        .background(Circle().fill(YMTheme.surfaceComponent))
                 }
                 .buttonStyle(.plain)
                 .help(likesService.isLiked(trackId: track.id) ? "Удалить из Мне нравится" : "Мне нравится")
             } else {
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(Color.white.opacity(0.06))
+                    .fill(YMTheme.surfaceComponent)
                     .frame(width: 44, height: 44)
 
                 Text("Ничего не играет")
@@ -150,7 +154,7 @@ public struct PlayerBarView: View {
                                 .font(.system(size: 12))
                                 .foregroundStyle(YMTheme.fg60)
                                 .padding(6)
-                                .background(Circle().fill(Color.white.opacity(0.08)))
+                                .background(Circle().fill(YMTheme.surfaceComponent))
                         }
                         .buttonStyle(.plain)
                         .disabled(audioEngine.currentTrack == nil)
@@ -182,7 +186,7 @@ public struct PlayerBarView: View {
                                 .font(.system(size: 12))
                                 .foregroundStyle(isFlameActive ? Color.orange : YMTheme.accent)
                                 .padding(6)
-                                .background(Circle().fill(Color.white.opacity(0.08)))
+                                .background(Circle().fill(YMTheme.surfaceComponent))
                         }
                         .buttonStyle(.plain)
                         .disabled(audioEngine.currentTrack == nil)
@@ -198,7 +202,7 @@ public struct PlayerBarView: View {
                                 .font(.system(size: 12))
                                 .foregroundStyle(audioEngine.isShuffleEnabled ? YMTheme.accent : YMTheme.fg60)
                                 .padding(6)
-                                .background(Circle().fill(audioEngine.isShuffleEnabled ? YMTheme.accent.opacity(0.15) : Color.white.opacity(0.08)))
+                                .background(Circle().fill(audioEngine.isShuffleEnabled ? YMTheme.accent.opacity(0.18) : YMTheme.surfaceComponent))
                         }
                         .buttonStyle(.plain)
                         .disabled(audioEngine.currentTrack == nil && audioEngine.queue.isEmpty)
@@ -225,7 +229,7 @@ public struct PlayerBarView: View {
                                 .font(.system(size: 12))
                                 .foregroundStyle(YMTheme.fg60)
                                 .padding(6)
-                                .background(Circle().fill(Color.white.opacity(0.08)))
+                                .background(Circle().fill(YMTheme.surfaceComponent))
                         }
                         .buttonStyle(.plain)
                         .disabled(audioEngine.currentTrack == nil)
@@ -266,9 +270,9 @@ public struct PlayerBarView: View {
         } label: {
             ZStack {
                 Circle()
-                    .fill(YMTheme.accent)
+                    .fill(YMTheme.accentFill)
                     .frame(width: 38, height: 38)
-                    .shadow(color: YMTheme.accent.opacity(audioEngine.isPlaying ? 0.35 : 0.15), radius: 6, y: 1)
+                    .shadow(color: YMTheme.accentFill.opacity(audioEngine.isPlaying ? 0.35 : 0.15), radius: 6, y: 1)
 
                 Image(systemName: audioEngine.isPlaying ? "pause.fill" : "play.fill")
                     .font(.system(size: 15, weight: .bold))
@@ -310,7 +314,7 @@ public struct PlayerBarView: View {
                         .font(.system(size: 12))
                         .foregroundStyle(coordinator.isLyricsPresented ? YMTheme.accent : YMTheme.fg60)
                         .padding(6)
-                        .background(Circle().fill(coordinator.isLyricsPresented ? YMTheme.accent.opacity(0.18) : Color.white.opacity(0.08)))
+                        .background(Circle().fill(coordinator.isLyricsPresented ? YMTheme.accent.opacity(0.18) : YMTheme.surfaceComponent))
                 }
                 .buttonStyle(.plain)
                 .help("Показать текст песни")
@@ -344,7 +348,7 @@ public struct PlayerBarView: View {
                     ),
                     in: 0...1,
                     activeColor: YMTheme.fg,
-                    trackColor: Color.white.opacity(0.12),
+                    trackColor: YMTheme.surfaceComponentHover,
                     height: 3
                 )
                 .frame(width: windowState.isMiniWidth ? 46 : 68)
@@ -475,7 +479,7 @@ private struct AudioQualityMenu: View {
         if isLosslessActive {
             return YMTheme.accent.opacity(0.18)
         }
-        return Color.white.opacity(0.08)
+        return YMTheme.surfaceComponent
     }
 
     private var badgeForeground: Color {
@@ -508,7 +512,7 @@ private struct IsolatedProgressSlider: View {
                 ),
                 in: 0...1,
                 activeColor: YMTheme.accent,
-                trackColor: Color.white.opacity(0.14),
+                trackColor: YMTheme.surfaceComponentHover,
                 height: 3,
                 onEditingChanged: { editing in
                     progressTracker.isUserSeeking = editing
