@@ -13,9 +13,15 @@ public final class NavigationCoordinator: @unchecked Sendable {
     public var path: [AppRoute] = []
     public var selectedSection: SidebarSection = .myWave
     public var isLyricsPresented: Bool = false
+    public var lyricsTrack: YMTrack? = nil
     public var activeSimilarTrack: YMTrack? = nil
 
     public init() {}
+
+    public func showLyrics(for track: YMTrack? = nil) {
+        self.lyricsTrack = track
+        self.isLyricsPresented = true
+    }
 
     public var canGoBack: Bool {
         !path.isEmpty

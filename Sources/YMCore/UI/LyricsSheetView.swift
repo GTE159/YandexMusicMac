@@ -19,7 +19,7 @@ public struct LyricsSheetView: View {
     }
 
     private var currentTrack: YMTrack? {
-        audioEngine.currentTrack ?? track
+        track ?? audioEngine.currentTrack
     }
 
     private var activeLineIndex: Int? {
@@ -59,6 +59,9 @@ public struct LyricsSheetView: View {
         }
         .onChange(of: audioEngine.currentTrack?.id) { _, _ in
             loadLyrics()
+        }
+        .onDisappear {
+            NavigationCoordinator.shared.lyricsTrack = nil
         }
     }
 
@@ -212,86 +215,111 @@ public struct LyricsSheetView: View {
 
     @ViewBuilder
     private var bottomPlaybackBar: some View {
-        HStack(spacing: 16) {
-            // Live Time
-            Text(audioEngine.progressTracker.currentTimeFormatted)
-                .font(.system(size: 12, weight: .medium).monospacedDigit())
-                .foregroundStyle(YMTheme.fg60)
-                .frame(width: 44, alignment: .leading)
+        if let target = currentTrack, target.id != audioEngine.currentTrack?.id {
+            HStack {
+                Text("Трек сейчас не воспроизводится")
+                    .font(.system(size: 12))
+                    .foregroundStyle(YMTheme.fg60)
 
-            // Seek slider
-            YMSlider(
-                value: Binding(
-                    get: { audioEngine.progressTracker.progress },
-                    set: { newFraction in
-                        audioEngine.progressTracker.progress = newFraction
-                    }
-                ),
-                in: 0...1,
-                activeColor: YMTheme.accent,
-                height: 4,
-                onEditingChanged: { dragging in
-                    audioEngine.progressTracker.isUserSeeking = dragging
-                    if !dragging {
-                        let target = audioEngine.progressTracker.currentTime
-                        audioEngine.seek(to: target)
+                Spacer()
+
+                Button {
+                    audioEngine.assignQueue([target], startingAt: 0)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 11))
+                        Text("Слушать этот трек")
+                            .font(.system(size: 12, weight: .semibold))
                     }
                 }
-            )
-
-            // Total Duration
-            Text(audioEngine.progressTracker.durationFormatted)
-                .font(.system(size: 12, weight: .medium).monospacedDigit())
-                .foregroundStyle(YMTheme.fg60)
-                .frame(width: 44, alignment: .trailing)
-
-            // Jump back 10s
-            Button {
-                let target = max(0, audioEngine.progressTracker.currentTime - 10)
-                audioEngine.seek(to: target)
-            } label: {
-                Image(systemName: "gobackward.10")
-                    .font(.system(size: 15))
-                    .foregroundStyle(YMTheme.fg80)
-                    .padding(6)
+                .buttonStyle(YMGlassPillButtonStyle(primary: true, height: 30))
             }
-            .buttonStyle(.plain)
-            .help("Назад на 10 сек")
+            .padding(.horizontal, 24)
+            .padding(.vertical, 12)
+            .background(YMTheme.surface)
+        } else {
+            HStack(spacing: 16) {
+                // Live Time
+                Text(audioEngine.progressTracker.currentTimeFormatted)
+                    .font(.system(size: 12, weight: .medium).monospacedDigit())
+                    .foregroundStyle(YMTheme.fg60)
+                    .frame(width: 44, alignment: .leading)
 
-            // Play / Pause
-            Button {
-                audioEngine.togglePlayPause()
-            } label: {
-                ZStack {
-                    Circle()
-                        .fill(YMTheme.accentFill)
-                        .frame(width: 32, height: 32)
+                // Seek slider
+                YMSlider(
+                    value: Binding(
+                        get: { audioEngine.progressTracker.progress },
+                        set: { newFraction in
+                            audioEngine.progressTracker.progress = newFraction
+                        }
+                    ),
+                    in: 0...1,
+                    activeColor: YMTheme.accent,
+                    height: 4,
+                    onEditingChanged: { dragging in
+                        audioEngine.progressTracker.isUserSeeking = dragging
+                        if !dragging {
+                            let target = audioEngine.progressTracker.currentTime
+                            audioEngine.seek(to: target)
+                        }
+                    }
+                )
 
-                    Image(systemName: audioEngine.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundColor(Color.black)
+                // Total Duration
+                Text(audioEngine.progressTracker.durationFormatted)
+                    .font(.system(size: 12, weight: .medium).monospacedDigit())
+                    .foregroundStyle(YMTheme.fg60)
+                    .frame(width: 44, alignment: .trailing)
+
+                // Jump back 10s
+                Button {
+                    let target = max(0, audioEngine.progressTracker.currentTime - 10)
+                    audioEngine.seek(to: target)
+                } label: {
+                    Image(systemName: "gobackward.10")
+                        .font(.system(size: 15))
+                        .foregroundStyle(YMTheme.fg80)
+                        .padding(6)
                 }
-            }
-            .buttonStyle(.plain)
-            .help(audioEngine.isPlaying ? "Пауза" : "Воспроизвести")
+                .buttonStyle(.plain)
+                .help("Назад на 10 сек")
 
-            // Jump forward 10s
-            Button {
-                let dur = audioEngine.progressTracker.duration
-                let target = min(dur, audioEngine.progressTracker.currentTime + 10)
-                audioEngine.seek(to: target)
-            } label: {
-                Image(systemName: "goforward.10")
-                    .font(.system(size: 15))
-                    .foregroundStyle(YMTheme.fg80)
-                    .padding(6)
+                // Play / Pause
+                Button {
+                    audioEngine.togglePlayPause()
+                } label: {
+                    ZStack {
+                        Circle()
+                            .fill(YMTheme.accentFill)
+                            .frame(width: 32, height: 32)
+
+                        Image(systemName: audioEngine.isPlaying ? "pause.fill" : "play.fill")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundColor(Color.black)
+                    }
+                }
+                .buttonStyle(.plain)
+                .help(audioEngine.isPlaying ? "Пауза" : "Воспроизвести")
+
+                // Jump forward 10s
+                Button {
+                    let dur = audioEngine.progressTracker.duration
+                    let target = min(dur, audioEngine.progressTracker.currentTime + 10)
+                    audioEngine.seek(to: target)
+                } label: {
+                    Image(systemName: "goforward.10")
+                        .font(.system(size: 15))
+                        .foregroundStyle(YMTheme.fg80)
+                        .padding(6)
+                }
+                .buttonStyle(.plain)
+                .help("Вперед на 10 сек")
             }
-            .buttonStyle(.plain)
-            .help("Вперед на 10 сек")
+            .padding(.horizontal, 24)
+            .padding(.vertical, 12)
+            .background(YMTheme.surface)
         }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 12)
-        .background(YMTheme.surface)
     }
 
     // MARK: - State Views

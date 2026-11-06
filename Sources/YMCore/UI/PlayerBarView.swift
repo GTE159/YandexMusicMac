@@ -57,7 +57,7 @@ public struct PlayerBarView: View {
         }
         .shadow(color: YMTheme.playerBarShadow, radius: 10, x: 0, y: -4)
         .sheet(isPresented: $coordinator.isLyricsPresented) {
-            LyricsSheetView(track: audioEngine.currentTrack)
+            LyricsSheetView(track: coordinator.lyricsTrack ?? audioEngine.currentTrack)
         }
     }
 
@@ -308,7 +308,7 @@ public struct PlayerBarView: View {
             // Lyrics Button (only shown if lyrics are available)
             if let track = audioEngine.currentTrack, track.hasLyrics {
                 Button {
-                    coordinator.isLyricsPresented = true
+                    coordinator.showLyrics(for: track)
                 } label: {
                     Image(systemName: "quote.bubble.fill")
                         .font(.system(size: 12))

@@ -299,8 +299,7 @@ private struct ModernTrackRow: View {
                 }
             }
             Button("Показать текст песни") {
-                audioEngine.assignQueue([track], startingAt: 0)
-                coordinator.isLyricsPresented = true
+                coordinator.showLyrics(for: track)
             }
             Divider()
             Button(likesService.isLiked(trackId: track.id) ? "Удалить из Мне нравится" : "Добавить в Мне нравится") {

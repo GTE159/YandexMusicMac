@@ -392,6 +392,9 @@ private struct ChartTrackRow: View {
                 onAlbumSelect(album)
             }
         }
+        Button("Показать текст песни") {
+            coordinator.showLyrics(for: track)
+        }
         Divider()
         Button(likesService.isLiked(trackId: track.id) ? "Удалить из Мне нравится" : "Добавить в Мне нравится") {
             Task {
