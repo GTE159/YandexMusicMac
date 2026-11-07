@@ -27,3 +27,4 @@ project_dump*.txt
 *.swp
 *~
 *.zip
+dist/
