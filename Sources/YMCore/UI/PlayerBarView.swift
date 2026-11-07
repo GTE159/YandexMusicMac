@@ -302,8 +302,8 @@ public struct PlayerBarView: View {
     @ViewBuilder
     private var rightControlsSection: some View {
         HStack(spacing: 12) {
-            // Lyrics Button (only shown if lyrics are available)
-            if let track = audioEngine.currentTrack, track.hasLyrics {
+            // Lyrics Button (available whenever track is loaded/playing)
+            if let track = audioEngine.currentTrack {
                 Button {
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                         if coordinator.isLyricsPresented {
@@ -314,14 +314,14 @@ public struct PlayerBarView: View {
                         }
                     }
                 } label: {
-                    Image(systemName: "quote.bubble.fill")
+                    Image(systemName: coordinator.isLyricsPresented ? "quote.bubble.fill" : "quote.bubble")
                         .font(.system(size: 12))
-                        .foregroundStyle(coordinator.isLyricsPresented ? YMTheme.accent : YMTheme.fg60)
+                        .foregroundStyle(coordinator.isLyricsPresented ? YMTheme.accent : YMTheme.fg80)
                         .padding(6)
                         .background(Circle().fill(coordinator.isLyricsPresented ? YMTheme.accent.opacity(0.18) : YMTheme.surfaceComponent))
                 }
                 .buttonStyle(.plain)
-                .help("Показать текст песни")
+                .help(coordinator.isLyricsPresented ? "Скрыть текст песни" : "Показать текст песни")
             }
 
             // Fixed-Width Quality Badge Menu (hidden in mini mode to prevent crowding)

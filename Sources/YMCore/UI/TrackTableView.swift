@@ -14,6 +14,7 @@ public struct TrackTableView: View {
     @UIState private var likesService = LikesService.shared
     @UIState private var coordinator = NavigationCoordinator.shared
     @UIState private var windowState = WindowState.shared
+    @UIState private var hoveredTrackId: String? = nil
 
     public init(
         tracks: [YMTrack],
@@ -47,7 +48,17 @@ public struct TrackTableView: View {
                         track: track,
                         index: index,
                         isPlaying: audioEngine.currentTrack?.id == track.id && audioEngine.isPlaying,
+                        isHovered: hoveredTrackId == track.id,
                         showAlbum: showAlbum,
+                        onHover: { isHovering in
+                            withAnimation(.easeInOut(duration: 0.08)) {
+                                if isHovering {
+                                    hoveredTrackId = track.id
+                                } else if hoveredTrackId == track.id {
+                                    hoveredTrackId = nil
+                                }
+                            }
+                        },
                         onPlay: {
                             onPlayTrack(track)
                         },
@@ -65,6 +76,11 @@ public struct TrackTableView: View {
                         }
                     }
                 }
+            }
+        }
+        .onHover { isInside in
+            if !isInside {
+                hoveredTrackId = nil
             }
         }
     }
@@ -107,7 +123,9 @@ private struct ModernTrackRow: View {
     let track: YMTrack
     let index: Int
     let isPlaying: Bool
+    let isHovered: Bool
     let showAlbum: Bool
+    let onHover: (Bool) -> Void
     let onPlay: () -> Void
     let onArtistSelect: (YMArtist) -> Void
     let onAlbumSelect: (YMAlbum) -> Void
@@ -116,8 +134,6 @@ private struct ModernTrackRow: View {
     @UIState private var audioEngine = AudioPlayerEngine.shared
     @UIState private var coordinator = NavigationCoordinator.shared
     @UIState private var windowState = WindowState.shared
-    @UIState private var isHovered = false
-    @UIState private var hoverTask: Task<Void, Never>? = nil
 
     var body: some View {
         HStack(spacing: 12) {
@@ -258,23 +274,7 @@ private struct ModernTrackRow: View {
         )
         .contentShape(Rectangle())
         .onHover { hovering in
-            hoverTask?.cancel()
-            if hovering {
-                hoverTask = Task {
-                    // Fast responsive hover with light debounce during rapid scroll
-                    try? await Task.sleep(nanoseconds: 20_000_000)
-                    guard !Task.isCancelled else { return }
-                    await MainActor.run {
-                        withAnimation(.easeInOut(duration: 0.08)) {
-                            isHovered = true
-                        }
-                    }
-                }
-            } else {
-                withAnimation(.easeOut(duration: 0.08)) {
-                    isHovered = false
-                }
-            }
+            onHover(hovering)
         }
         .onTapGesture(count: 2) {
             onPlay()

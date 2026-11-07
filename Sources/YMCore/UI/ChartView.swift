@@ -10,6 +10,7 @@ public struct ChartView: View {
     @UIState private var likesService = LikesService.shared
     @UIState private var coordinator = NavigationCoordinator.shared
     @UIState private var windowState = WindowState.shared
+    @UIState private var hoveredTrackId: String? = nil
     private let networkClient = YMNetworkClient.shared
 
     public init() {}
@@ -120,6 +121,16 @@ public struct ChartView: View {
                                         track: track,
                                         index: index,
                                         isPlaying: audioEngine.currentTrack?.id == track.id && audioEngine.isPlaying,
+                                        isHovered: hoveredTrackId == track.id,
+                                        onHover: { isHovering in
+                                            withAnimation(.easeInOut(duration: 0.08)) {
+                                                if isHovering {
+                                                    hoveredTrackId = track.id
+                                                } else if hoveredTrackId == track.id {
+                                                    hoveredTrackId = nil
+                                                }
+                                            }
+                                        },
                                         onPlay: {
                                             audioEngine.assignQueue(chartTracks, startingAt: index)
                                         },
@@ -135,6 +146,11 @@ public struct ChartView: View {
                         }
                         .padding(.horizontal, 14)
                         .padding(.bottom, 90)
+                        .onHover { isInside in
+                            if !isInside {
+                                hoveredTrackId = nil
+                            }
+                        }
                     }
                 }
             }
@@ -174,6 +190,8 @@ private struct ChartTrackRow: View {
     let track: YMTrack
     let index: Int
     let isPlaying: Bool
+    let isHovered: Bool
+    let onHover: (Bool) -> Void
     let onPlay: () -> Void
     let onArtistSelect: (YMArtist) -> Void
     let onAlbumSelect: (YMAlbum) -> Void
@@ -182,8 +200,6 @@ private struct ChartTrackRow: View {
     @UIState private var audioEngine = AudioPlayerEngine.shared
     @UIState private var coordinator = NavigationCoordinator.shared
     @UIState private var windowState = WindowState.shared
-    @UIState private var isHovered = false
-    @UIState private var hoverTask: Task<Void, Never>? = nil
 
     private var position: Int {
         item.chart?.position ?? (index + 1)
@@ -209,22 +225,7 @@ private struct ChartTrackRow: View {
         )
         .contentShape(Rectangle())
         .onHover { hovering in
-            hoverTask?.cancel()
-            if hovering {
-                hoverTask = Task {
-                    try? await Task.sleep(nanoseconds: 20_000_000)
-                    guard !Task.isCancelled else { return }
-                    await MainActor.run {
-                        withAnimation(.easeInOut(duration: 0.08)) {
-                            isHovered = true
-                        }
-                    }
-                }
-            } else {
-                withAnimation(.easeOut(duration: 0.08)) {
-                    isHovered = false
-                }
-            }
+            onHover(hovering)
         }
         .onTapGesture(count: 2) {
             onPlay()
