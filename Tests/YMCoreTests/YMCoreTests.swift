@@ -1196,4 +1196,40 @@ func testWaveContextForArtist() {
     #expect(context.fallbackStationId == "artist:999")
 }
 
+@Test("Account Status active subscription evaluation")
+func testAccountStatusActiveSubscription() {
+    // 1. Account with active Plus
+    let activePlusStatus = YMAccountStatus(
+        plus: YMPlusInfo(hasPlus: true)
+    )
+    #expect(activePlusStatus.hasActiveSubscription == true)
+
+    // 2. Account with NO Plus, but had subscription in the past (User's case)
+    let expiredHadSubStatus = YMAccountStatus(
+        plus: YMPlusInfo(hasPlus: false),
+        subscription: YMSubscriptionInfo(hadAnySubscription: true)
+    )
+    #expect(expiredHadSubStatus.hasActiveSubscription == false)
+    #expect(expiredHadSubStatus.hadAnySubscription == true)
+
+    // 3. Account with future permissions until date
+    let futureUntilStatus = YMAccountStatus(
+        permissions: YMPermissionsInfo(until: "2099-01-01T00:00:00Z"),
+        plus: YMPlusInfo(hasPlus: false)
+    )
+    #expect(futureUntilStatus.hasActiveSubscription == true)
+
+    // 4. Account with expired permissions until date
+    let expiredUntilStatus = YMAccountStatus(
+        permissions: YMPermissionsInfo(until: "2020-01-01T00:00:00Z"),
+        plus: YMPlusInfo(hasPlus: false)
+    )
+    #expect(expiredUntilStatus.hasActiveSubscription == false)
+
+    // 5. Completely empty/free account
+    let freeStatus = YMAccountStatus()
+    #expect(freeStatus.hasActiveSubscription == false)
+}
+
+
 

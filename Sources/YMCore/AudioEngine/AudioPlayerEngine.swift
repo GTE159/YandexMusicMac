@@ -34,6 +34,22 @@ public final class AudioPlayerEngine {
     /// Hardware audio track format details (sample rate, channel layout) from AVPlayerItem
     public private(set) var currentAudioFormatDetails: String?
 
+    public var isSubscriptionRequiredPresented: Bool = false
+
+    /// Checks whether the user has a valid subscription to stream audio.
+    /// Returns true if playback can proceed, or false (triggering modal) if blocked.
+    @discardableResult
+    public func checkSubscriptionEligibility() -> Bool {
+        if AuthService.shared.isAuthenticated,
+           let user = AuthService.shared.currentUser,
+           !user.hasActiveSubscription {
+            self.stopAndClear()
+            self.isSubscriptionRequiredPresented = true
+            return false
+        }
+        return true
+    }
+
     public var volume: Float {
         get { player.volume }
         set { player.volume = max(0, min(1, newValue)) }
@@ -82,6 +98,7 @@ public final class AudioPlayerEngine {
     // MARK: - Queue & Playback Control
 
     public func setQueue(_ newQueue: [YMTrack], startingAt index: Int = 0, keepShuffle: Bool = false) {
+        guard checkSubscriptionEligibility() else { return }
         if !keepShuffle {
             self.isShuffleEnabled = false
             self.unshuffledQueue = [] // Не дублируем память, пока Shuffle не включен
@@ -136,6 +153,7 @@ public final class AudioPlayerEngine {
     }
 
     public func playTrack(at index: Int) {
+        guard checkSubscriptionEligibility() else { return }
         guard index >= 0 && index < queue.count else { return }
         pendingWaveAdvance = false
 
@@ -179,6 +197,7 @@ public final class AudioPlayerEngine {
     }
 
     public func play() {
+        guard checkSubscriptionEligibility() else { return }
         guard currentTrack != nil else { return }
         if timeObserverToken == nil {
             setupTimeObserver()
@@ -311,6 +330,7 @@ public final class AudioPlayerEngine {
     }
 
     public func playShuffled(_ tracks: [YMTrack]) {
+        guard checkSubscriptionEligibility() else { return }
         let filtered = tracks.filter { !$0.isPlaceholder && !$0.isSpacer }
         guard !filtered.isEmpty else { return }
         self.unshuffledQueue = filtered
@@ -334,17 +354,20 @@ public final class AudioPlayerEngine {
     }
 
     public func startWave(forTrack track: YMTrack) {
+        guard checkSubscriptionEligibility() else { return }
         let context = YMWaveContext.forTrack(track)
         onStartCustomWaveRequested?(context, nil)
     }
 
     public func startWave(forPlaylist playlist: YMPlaylist, tracks: [YMTrack]) {
+        guard checkSubscriptionEligibility() else { return }
         let sampleIds = tracks.filter { !$0.isPlaceholder && !$0.isSpacer }.shuffled().prefix(5).map(\.id)
         let context = YMWaveContext.forPlaylist(playlist, sampleTrackIds: Array(sampleIds))
         onStartCustomWaveRequested?(context, nil)
     }
 
     public func startWave(forArtist artist: YMArtist) {
+        guard checkSubscriptionEligibility() else { return }
         let context = YMWaveContext.forArtist(artist)
         onStartCustomWaveRequested?(context, nil)
     }
@@ -379,6 +402,7 @@ public final class AudioPlayerEngine {
     // MARK: - Stream Loading & Expired Token Recovery
 
     private func loadAndPlay(track: YMTrack, seekTo seekSeconds: Double?, autoPlay: Bool = true, forceRefresh: Bool = false, isInitialTrackStart: Bool = true) {
+        guard checkSubscriptionEligibility() else { return }
         loadTask?.cancel()
         NavigationCoordinator.shared.lyricsTrack = nil
         if timeObserverToken == nil {

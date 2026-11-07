@@ -11,6 +11,7 @@ public struct MyWaveView: View {
     @UIState private var windowState = WindowState.shared
     @UIState private var coordinator = NavigationCoordinator.shared
     @UIState private var likesService = LikesService.shared
+    @UIState private var authService = AuthService.shared
 
     @UIState private var isLoadingWave = false
     @UIState private var isLoadingMoreWave = false
@@ -36,6 +37,35 @@ public struct MyWaveView: View {
             VStack(spacing: 24) {
                 // Top Header & Monolithic Hero Banner
                 headerAndHeroSection
+
+                if let user = authService.currentUser, !user.hasActiveSubscription {
+                    HStack(spacing: 12) {
+                        Image(systemName: "sparkles")
+                            .foregroundColor(YMTheme.accent)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Требуется подписка Яндекс Плюс")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(YMTheme.fg)
+                            Text("Для прослушивания Моей волны необходим активный Плюс")
+                                .font(.system(size: 11))
+                                .foregroundStyle(YMTheme.fg60)
+                        }
+                        Spacer()
+                        Button("Оформить") {
+                            if let url = URL(string: "https://plus.yandex.ru/") {
+                                NSWorkspace.shared.open(url)
+                            }
+                        }
+                        .buttonStyle(YMGlassPillButtonStyle(primary: true, height: 28))
+                    }
+                    .padding(14)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(YMTheme.surfaceComponent)
+                            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(YMTheme.border, lineWidth: 1))
+                    )
+                    .padding(.horizontal, 24)
+                }
 
                 // Minimalist Vibe Presets
                 vibePresetsSelector

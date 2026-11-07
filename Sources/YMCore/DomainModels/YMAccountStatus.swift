@@ -27,9 +27,30 @@ public struct YMAccountStatus: Codable, Sendable {
     }
 
     public var hasActiveSubscription: Bool {
-        if let plus = plus?.hasPlus, plus { return true }
-        if let sub = subscription?.hadAnySubscription, sub { return true }
+        // 1. Direct Yandex Plus flag from API
+        if let hasPlus = plus?.hasPlus {
+            if hasPlus { return true }
+        }
+
+        // 2. Check permissions expiration date if present
+        if let untilStr = permissions?.until,
+           let untilDate = Self.parseDate(untilStr),
+           untilDate > Date() {
+            return true
+        }
+
         return false
+    }
+
+    public var hadAnySubscription: Bool {
+        subscription?.hadAnySubscription ?? false
+    }
+
+    private static func parseDate(_ string: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        if let date = formatter.date(from: string) { return date }
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.date(from: string)
     }
 }
 
@@ -80,6 +101,12 @@ public struct YMPermissionsInfo: Codable, Sendable {
     public let values: [String]?
     public let defaults: [String]?
 
+    public init(until: String? = nil, values: [String]? = nil, defaults: [String]? = nil) {
+        self.until = until
+        self.values = values
+        self.defaults = defaults
+    }
+
     enum CodingKeys: String, CodingKey {
         case until
         case values
@@ -90,9 +117,19 @@ public struct YMPermissionsInfo: Codable, Sendable {
 public struct YMPlusInfo: Codable, Sendable {
     public let hasPlus: Bool?
     public let isTutorialCompleted: Bool?
+
+    public init(hasPlus: Bool? = nil, isTutorialCompleted: Bool? = nil) {
+        self.hasPlus = hasPlus
+        self.isTutorialCompleted = isTutorialCompleted
+    }
 }
 
 public struct YMSubscriptionInfo: Codable, Sendable {
     public let hadAnySubscription: Bool?
     public let canStartTrial: Bool?
+
+    public init(hadAnySubscription: Bool? = nil, canStartTrial: Bool? = nil) {
+        self.hadAnySubscription = hadAnySubscription
+        self.canStartTrial = canStartTrial
+    }
 }

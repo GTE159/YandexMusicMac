@@ -50,6 +50,9 @@ public struct MainSplitView: View {
         .preferredColorScheme(themeManager.currentTheme.colorScheme)
         .toolbar(.hidden, for: .windowToolbar)
         .frame(minWidth: 440, minHeight: 320)
+        .sheet(isPresented: $audioEngine.isSubscriptionRequiredPresented) {
+            SubscriptionRequiredSheetView(isPresented: $audioEngine.isSubscriptionRequiredPresented)
+        }
         .ymTouchBar()
         .onAppear {
             setupRotorAudioHooks()
@@ -147,6 +150,14 @@ public struct MainSplitView: View {
                                     .font(.system(size: 10, weight: .semibold))
                             }
                             .foregroundColor(YMTheme.accent)
+                        } else {
+                            HStack(spacing: 3) {
+                                Image(systemName: "exclamationmark.circle")
+                                    .font(.system(size: 8))
+                                Text("Без подписки")
+                                    .font(.system(size: 10, weight: .semibold))
+                            }
+                            .foregroundColor(YMTheme.fg40)
                         }
                     }
 

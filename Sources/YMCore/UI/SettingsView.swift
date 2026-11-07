@@ -174,6 +174,24 @@ public struct SettingsView: View {
                                             .font(.caption.weight(.medium))
                                     }
                                     .foregroundStyle(YMTheme.accent)
+                                } else {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "exclamationmark.triangle.fill")
+                                            .font(.caption2)
+                                            .foregroundStyle(.orange)
+                                        Text("Подписка Яндекс Плюс не активна")
+                                            .font(.caption.weight(.medium))
+                                            .foregroundStyle(.orange)
+
+                                        Button("Оформить") {
+                                            if let url = URL(string: "https://plus.yandex.ru/") {
+                                                NSWorkspace.shared.open(url)
+                                            }
+                                        }
+                                        .buttonStyle(.plain)
+                                        .font(.caption.weight(.bold))
+                                        .foregroundStyle(YMTheme.accent)
+                                    }
                                 }
                             }
 
