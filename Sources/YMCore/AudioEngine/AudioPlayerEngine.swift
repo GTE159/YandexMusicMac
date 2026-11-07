@@ -68,6 +68,7 @@ public final class AudioPlayerEngine {
     private var accumulatedPlayedSeconds: Double = 0
     private var lastObservedPlaybackTime: Double = 0
     private var suppressNextSkipTelemetry: Bool = false
+    private var pendingWaveAdvance: Bool = false
 
     public init() {
         setupSystemObservers()
@@ -113,6 +114,10 @@ public final class AudioPlayerEngine {
     }
 
     public func appendToQueue(_ tracks: [YMTrack]) {
+        guard !tracks.isEmpty else { return }
+        let wasWaitingForWaveAdvance = pendingWaveAdvance
+        pendingWaveAdvance = false
+
         self.queue.append(contentsOf: tracks)
         if isWaveMode && currentIndex > 40 {
             // Очищаем прослушанные треки волны раньше (порог 40 вместо 100)
@@ -124,10 +129,15 @@ public final class AudioPlayerEngine {
         } else if !isWaveMode && isShuffleEnabled {
             self.unshuffledQueue.append(contentsOf: tracks)
         }
+
+        if isWaveMode && wasWaitingForWaveAdvance && currentIndex + 1 < queue.count {
+            playTrack(at: currentIndex + 1)
+        }
     }
 
     public func playTrack(at index: Int) {
         guard index >= 0 && index < queue.count else { return }
+        pendingWaveAdvance = false
 
         if timeObserverToken == nil {
             setupTimeObserver()
@@ -173,9 +183,11 @@ public final class AudioPlayerEngine {
         if timeObserverToken == nil {
             setupTimeObserver()
         }
+        if !isPlaying {
+            trackStartTimestamp = Date()
+        }
         player.play()
         isPlaying = true
-        trackStartTimestamp = Date()
         NowPlayingController.shared.updatePlaybackState(isPlaying: true, currentTime: progressTracker.currentTime)
     }
 
@@ -203,6 +215,7 @@ public final class AudioPlayerEngine {
         activeWaveContext = .myWaveDefault
         activeWaveVibe = .defaultWave
         suppressNextSkipTelemetry = false
+        pendingWaveAdvance = false
         currentStreamInfo = nil
         availableStreamInfos = []
         currentAudioFormatDetails = nil
@@ -212,8 +225,10 @@ public final class AudioPlayerEngine {
 
     public func next() {
         if currentIndex + 1 < queue.count {
+            pendingWaveAdvance = false
             playTrack(at: currentIndex + 1)
         } else if isWaveMode {
+            pendingWaveAdvance = true
             onQueueNeedsMoreTracks?()
         }
     }
@@ -236,6 +251,7 @@ public final class AudioPlayerEngine {
     }
 
     public func seek(to seconds: Double) {
+        guard seconds.isFinite && seconds >= 0 else { return }
         progressTracker.currentTime = seconds
         progressTracker.seekLockUntil = Date().addingTimeInterval(0.4)
         lastObservedPlaybackTime = seconds
@@ -466,6 +482,7 @@ public final class AudioPlayerEngine {
                     if autoPlay {
                         self.player.play()
                         self.isPlaying = true
+                        self.trackStartTimestamp = Date()
                     } else {
                         self.isPlaying = false
                     }
@@ -482,6 +499,7 @@ public final class AudioPlayerEngine {
             if autoPlay {
                 player.play()
                 isPlaying = true
+                trackStartTimestamp = Date()
             } else {
                 isPlaying = false
             }
@@ -525,7 +543,8 @@ public final class AudioPlayerEngine {
                                 let channels = asbd.mChannelsPerFrame
                                 let channelStr = channels == 2 ? "Stereo" : (channels == 1 ? "Mono" : "\(channels) ch")
                                 await MainActor.run { [weak self] in
-                                    self?.currentAudioFormatDetails = "\(sampleRate) Hz, \(channelStr)"
+                                    guard let self = self, self.player.currentItem === item else { return }
+                                    self.currentAudioFormatDetails = "\(sampleRate) Hz, \(channelStr)"
                                 }
                             }
                         }

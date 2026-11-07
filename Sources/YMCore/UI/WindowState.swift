@@ -70,8 +70,14 @@ public final class WindowState {
     /// Verifies that the window is the primary application window, not an accessory popup, menu, or tooltip.
     private func isValidAppWindow(_ window: NSWindow) -> Bool {
         guard !(window is NSPanel) else { return false }
+        guard window.sheetParent == nil else { return false }
         guard window.level == .normal else { return false }
         guard window.canBecomeMain else { return false }
+        if window.identifier?.rawValue.contains("Settings") == true ||
+           window.title.contains("Settings") ||
+           window.title.contains("Настройки") {
+            return false
+        }
         let className = window.className
         guard !className.contains("Menu"),
               !className.contains("Popover"),

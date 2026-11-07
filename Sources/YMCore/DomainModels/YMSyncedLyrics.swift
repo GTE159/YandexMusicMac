@@ -59,6 +59,8 @@ public struct YMSyncedLyrics: Sendable, Hashable {
         return result
     }
 
+    private static let tagRegex = try? NSRegularExpression(pattern: "\\[(\\d{1,2}):(\\d{2})(?:\\.(\\d{1,3}))?\\]")
+
     /// Parses standard LRC format text into chronological SyncedLyricLine array.
     /// Handles multiple timestamp tags per line (e.g. `[00:12.30][00:24.50] Refrain`)
     /// and millisecond fractions (`.xx` or `.xxx`).
@@ -66,7 +68,6 @@ public struct YMSyncedLyrics: Sendable, Hashable {
         var parsed: [(time: TimeInterval, text: String)] = []
 
         let rawLines = lrcContent.components(separatedBy: .newlines)
-        let tagRegex = try? NSRegularExpression(pattern: "\\[(\\d{1,2}):(\\d{2})(?:\\.(\\d{1,3}))?\\]")
 
         for rawLine in rawLines {
             let trimmed = rawLine.trimmingCharacters(in: .whitespaces)

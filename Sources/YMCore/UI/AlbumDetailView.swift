@@ -148,7 +148,7 @@ public struct AlbumDetailView: View {
             }
         }
         .ymScreenBackground()
-        .task {
+        .task(id: albumId) {
             loadAlbumData()
         }
     }

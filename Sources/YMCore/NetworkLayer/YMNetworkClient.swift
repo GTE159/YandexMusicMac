@@ -20,6 +20,12 @@ public actor YMNetworkClient {
     public static let clientHeader = "YandexMusicAndroid/24023621"
     public static let acceptLanguage = "ru"
 
+    /// Безопасное экранирование сегментов URL-пути
+    public nonisolated static func escapePath(_ segment: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~:"))
+        return segment.addingPercentEncoding(withAllowedCharacters: allowed) ?? segment
+    }
+
     public init(
         baseURL: URL = URL(string: "https://api.music.yandex.net")!,
         token: String? = nil,
@@ -142,10 +148,15 @@ public actor YMNetworkClient {
         // Mandatory headers
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue(Self.acceptLanguage, forHTTPHeaderField: "Accept-Language")
-        request.setValue(Self.clientHeader, forHTTPHeaderField: "X-Yandex-Music-Client")
 
-        if let token = self.token, !token.isEmpty {
-            request.setValue("OAuth \(token)", forHTTPHeaderField: "Authorization")
+        let isTrustedAPIHost = finalURL.scheme?.lowercased() == "https" &&
+                               finalURL.host?.lowercased() == baseURL.host?.lowercased()
+
+        if isTrustedAPIHost {
+            request.setValue(Self.clientHeader, forHTTPHeaderField: "X-Yandex-Music-Client")
+            if let token = self.token, !token.isEmpty {
+                request.setValue("OAuth \(token)", forHTTPHeaderField: "Authorization")
+            }
         }
 
         if body != nil && request.value(forHTTPHeaderField: "Content-Type") == nil {
@@ -179,7 +190,7 @@ public actor YMNetworkClient {
 
     /// Step 1: GET /tracks/{trackId}/download-info -> Pick MP3 320kbps
     public func getDownloadInfo(for trackId: String) async throws -> [YMDownloadInfo] {
-        try await request(endpoint: "/tracks/\(trackId)/download-info")
+        try await request(endpoint: "/tracks/\(Self.escapePath(trackId))/download-info")
     }
 
     /// Step 2: GET {downloadInfoUrl}&format=json -> Parse host, path, ts, s
@@ -603,12 +614,12 @@ public actor YMNetworkClient {
 
     /// GET /users/{uid}/playlists/list
     public func fetchUserPlaylists(uid: String) async throws -> [YMPlaylist] {
-        try await request(endpoint: "/users/\(uid)/playlists/list")
+        try await request(endpoint: "/users/\(Self.escapePath(uid))/playlists/list")
     }
 
     /// GET /users/{uid}/playlists/{kind}
     public func fetchPlaylistDetails(uid: String, kind: Int) async throws -> YMPlaylist {
-        try await request(endpoint: "/users/\(uid)/playlists/\(kind)")
+        try await request(endpoint: "/users/\(Self.escapePath(uid))/playlists/\(kind)")
     }
 
     // MARK: - Search & Artist API
@@ -619,18 +630,18 @@ public actor YMNetworkClient {
             URLQueryItem(name: "page", value: String(page)),
             URLQueryItem(name: "page-size", value: String(pageSize))
         ]
-        let response: YMArtistTracksResponse = try await request(endpoint: "/artists/\(artistId)/tracks", queryItems: queryItems)
+        let response: YMArtistTracksResponse = try await request(endpoint: "/artists/\(Self.escapePath(artistId))/tracks", queryItems: queryItems)
         return response.tracks
     }
 
     /// GET /artists/{artistId}/brief-info
     public func fetchArtistBriefInfo(artistId: String) async throws -> YMArtistBriefInfo {
-        try await request(endpoint: "/artists/\(artistId)/brief-info")
+        try await request(endpoint: "/artists/\(Self.escapePath(artistId))/brief-info")
     }
 
     /// GET /albums/{albumId}/with-tracks
     public func fetchAlbumWithTracks(albumId: String) async throws -> YMAlbumWithTracks {
-        try await request(endpoint: "/albums/\(albumId)/with-tracks")
+        try await request(endpoint: "/albums/\(Self.escapePath(albumId))/with-tracks")
     }
 
     /// GET /landing3/chart
@@ -641,7 +652,7 @@ public actor YMNetworkClient {
 
     /// GET /tracks/{trackId}/supplement
     public func fetchTrackSupplement(trackId: String) async throws -> YMTrackSupplement {
-        try await request(endpoint: "/tracks/\(trackId)/supplement")
+        try await request(endpoint: "/tracks/\(Self.escapePath(trackId))/supplement")
     }
 
     /// Response envelope for GET /tracks/{trackId}/lyrics
@@ -688,7 +699,7 @@ public actor YMNetworkClient {
         let envelope: YMLyricsEnvelope
         do {
             envelope = try await request(
-                endpoint: "/tracks/\(numericId)/lyrics",
+                endpoint: "/tracks/\(Self.escapePath(numericId))/lyrics",
                 queryItems: queryItems
             )
         } catch {
@@ -723,7 +734,7 @@ public actor YMNetworkClient {
                 case similarTracks
             }
         }
-        let response: SimilarResponse = try await request(endpoint: "/tracks/\(trackId)/similar")
+        let response: SimilarResponse = try await request(endpoint: "/tracks/\(Self.escapePath(trackId))/similar")
         return response.similarTracks
     }
 

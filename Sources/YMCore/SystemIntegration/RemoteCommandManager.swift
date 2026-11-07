@@ -15,15 +15,20 @@ public final class RemoteCommandManager {
     }
 
     deinit {
-        // Detach all targets
         let commandCenter = MPRemoteCommandCenter.shared()
-        commandCenter.playCommand.isEnabled = false
-        commandCenter.pauseCommand.isEnabled = false
-        commandCenter.togglePlayPauseCommand.isEnabled = false
-        commandCenter.nextTrackCommand.isEnabled = false
-        commandCenter.previousTrackCommand.isEnabled = false
-        commandCenter.changePlaybackPositionCommand.isEnabled = false
-        commandCenter.likeCommand.isEnabled = false
+        let commands = [
+            commandCenter.playCommand,
+            commandCenter.pauseCommand,
+            commandCenter.togglePlayPauseCommand,
+            commandCenter.nextTrackCommand,
+            commandCenter.previousTrackCommand,
+            commandCenter.changePlaybackPositionCommand,
+            commandCenter.likeCommand
+        ]
+        for command in commands {
+            command.isEnabled = false
+            command.removeTarget(nil)
+        }
     }
 
     public func configure(with engine: AudioPlayerEngine) {
@@ -32,6 +37,18 @@ public final class RemoteCommandManager {
 
     private func setupCommands() {
         let commandCenter = MPRemoteCommandCenter.shared()
+        let commands = [
+            commandCenter.playCommand,
+            commandCenter.pauseCommand,
+            commandCenter.togglePlayPauseCommand,
+            commandCenter.nextTrackCommand,
+            commandCenter.previousTrackCommand,
+            commandCenter.changePlaybackPositionCommand,
+            commandCenter.likeCommand
+        ]
+        for command in commands {
+            command.removeTarget(nil)
+        }
 
         // Play / Pause / Toggle
         commandCenter.playCommand.isEnabled = true

@@ -73,6 +73,7 @@ public struct YMSlider: View {
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { gesture in
+                        guard width > 0 else { return }
                         if !isDragging {
                             isDragging = true
                             onEditingChanged?(true)
@@ -85,6 +86,7 @@ public struct YMSlider: View {
                         value = newValue
                     }
                     .onEnded { gesture in
+                        guard width > 0 else { return }
                         let ratio = gesture.location.x / width
                         let clampedRatio = min(max(ratio, 0), 1)
                         let total = range.upperBound - range.lowerBound

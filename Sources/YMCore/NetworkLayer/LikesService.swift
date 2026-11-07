@@ -145,7 +145,7 @@ public final class LikesService {
 
     /// Ensures user's liked collection is loaded on demand without requiring manual refresh.
     public func ensureInitialLikesLoaded() async {
-        guard !hasLoadedInitialBatch || likedTracks.isEmpty else { return }
+        guard !isSyncing, (!hasLoadedInitialBatch || likedTracks.isEmpty) else { return }
         do {
             _ = try await fetchLikedTracks(initialLimit: 50)
         } catch {
@@ -164,7 +164,7 @@ public final class LikesService {
         defer { self.isSyncing = false }
 
         let response: YMLikesLibraryResponse = try await networkClient.request(
-            endpoint: "/users/\(resolvedUid)/likes/tracks",
+            endpoint: "/users/\(YMNetworkClient.escapePath(resolvedUid))/likes/tracks",
             cachePolicy: .reloadIgnoringLocalCacheData
         )
 
@@ -182,24 +182,19 @@ public final class LikesService {
 
         // Preserve any freshly liked local tracks that haven't propagated to API yet
         let localUnsynced = self.likedTracks.filter { track in
-            !track.isPlaceholder && !allLikedItems.contains(where: { $0.id == track.id })
+            !track.isPlaceholder && !allLikedItems.contains(where: { $0.id == extractCleanId(from: track.id) })
         }
 
         let initialBatchSize = min(initialLimit, allLikedItems.count)
         let initialSlice = Array(allLikedItems.prefix(initialBatchSize))
         let idsToFetch = initialSlice.map(\.id)
 
-        do {
-            let fullTracks = try await networkClient.fetchTracks(trackIds: idsToFetch)
-            var result = localUnsynced
-            result.append(contentsOf: fullTracks)
-            self.likedTracks = result
-            self.searchCatalog = fullTracks
-        } catch {
-            print("[LikesService] Error fetching initial batch: \(error)")
-        }
-
-        self.hasMoreLikes = self.likedTracks.count < self.allLikedItems.count
+        let fullTracks = try await networkClient.fetchTracks(trackIds: idsToFetch)
+        var result = localUnsynced
+        result.append(contentsOf: fullTracks)
+        self.likedTracks = result
+        self.searchCatalog = fullTracks
+        self.hasMoreLikes = self.likedTracks.count < self.allLikedItems.count || self.likedTracks.contains(where: \.isPlaceholder)
         self.hasLoadedInitialBatch = true
 
         if AudioQualitySettings.shared.preloadAllFavoritesInBackground {
@@ -309,14 +304,14 @@ public final class LikesService {
 
     /// Fetches track immediately if user clicks on a placeholder row before batch arrives
     public func fetchTrackImmediately(trackId: String) async -> YMTrack? {
-        if let found = likedTracks.first(where: { $0.id == trackId && !$0.isPlaceholder }) {
+        let cleanId = extractCleanId(from: trackId)
+        if let found = likedTracks.first(where: { !$0.isPlaceholder && (extractCleanId(from: $0.id) == cleanId || $0.id == trackId) }) {
             return found
         }
-        let cleanId = extractCleanId(from: trackId)
         do {
             let fetched = try await networkClient.fetchTracks(trackIds: [cleanId])
             if let track = fetched.first {
-                if let idx = likedTracks.firstIndex(where: { $0.id == trackId }) {
+                if let idx = likedTracks.firstIndex(where: { $0.id == trackId || extractCleanId(from: $0.id) == cleanId }) {
                     likedTracks[idx] = track
                 }
                 let existingIds = Set(self.searchCatalog.map(\.id))
@@ -334,6 +329,33 @@ public final class LikesService {
     /// Loads the next batch of real tracks from allLikedItems as user scrolls
     public func loadMoreLikedTracks(batchSize: Int = 50) async {
         guard !isLoadingMore else { return }
+
+        // 1. Если после сжатия памяти в likedTracks есть плейсхолдеры — сначала гидрируем их
+        if let firstPlaceholderIdx = likedTracks.firstIndex(where: \.isPlaceholder) {
+            self.isLoadingMore = true
+            defer { self.isLoadingMore = false }
+
+            let batchEnd = min(firstPlaceholderIdx + batchSize, min(likedTracks.count, allLikedItems.count))
+            let idsToFetch = (firstPlaceholderIdx..<batchEnd).map { allLikedItems[$0].id }
+            do {
+                let fetched = try await networkClient.fetchTracks(trackIds: idsToFetch)
+                let trackMap = Dictionary(fetched.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+                for i in firstPlaceholderIdx..<batchEnd {
+                    let itemId = allLikedItems[i].id
+                    if let realTrack = trackMap[itemId] {
+                        likedTracks[i] = realTrack
+                    }
+                }
+                let existingIds = Set(self.searchCatalog.map(\.id))
+                self.searchCatalog.append(contentsOf: fetched.filter { !existingIds.contains($0.id) })
+                self.hasMoreLikes = self.likedTracks.count < self.allLikedItems.count || self.likedTracks.contains(where: \.isPlaceholder)
+            } catch {
+                print("[LikesService] Error hydrating placeholder tracks: \(error)")
+            }
+            return
+        }
+
+        // 2. Стандартная подгрузка следующих чанков
         let currentCount = likedTracks.count
         guard currentCount < allLikedItems.count else {
             self.hasMoreLikes = false
@@ -350,8 +372,9 @@ public final class LikesService {
         do {
             let fetched = try await networkClient.fetchTracks(trackIds: idsToFetch)
             self.likedTracks.append(contentsOf: fetched)
-            self.searchCatalog.append(contentsOf: fetched)
-            self.hasMoreLikes = self.likedTracks.count < self.allLikedItems.count
+            let existingIds = Set(self.searchCatalog.map(\.id))
+            self.searchCatalog.append(contentsOf: fetched.filter { !existingIds.contains($0.id) })
+            self.hasMoreLikes = self.likedTracks.count < self.allLikedItems.count || self.likedTracks.contains(where: \.isPlaceholder)
         } catch {
             print("[LikesService] Error loading more liked tracks: \(error)")
         }
@@ -538,6 +561,7 @@ public final class LikesService {
         let previousLikedIds = self.likedTrackIds
         let previousLikedTracks = self.likedTracks
         let previousAllLikedItems = self.allLikedItems
+        let previousSearchCatalog = self.searchCatalog
 
         // Находим известный albumId для точного запроса к API Яндекса
         let knownTrack = trackObject
@@ -604,6 +628,7 @@ public final class LikesService {
             self.likedTrackIds = previousLikedIds
             self.likedTracks = previousLikedTracks
             self.allLikedItems = previousAllLikedItems
+            self.searchCatalog = previousSearchCatalog
             self.hasMoreLikes = self.likedTracks.contains { $0.isPlaceholder }
         }
     }

@@ -46,14 +46,14 @@ public final class KeychainManager: @unchecked Sendable {
     // MARK: - Generic Secure Storage Operations
 
     public func setString(_ value: String, for key: KeychainKey) throws {
-        cacheLock.lock()
-        inMemoryCache[key.rawValue] = value
-        cacheLock.unlock()
-
         guard let data = value.data(using: .utf8) else {
             throw KeychainError.invalidDataConversion
         }
         try setData(data, for: key.rawValue)
+
+        cacheLock.lock()
+        inMemoryCache[key.rawValue] = value
+        cacheLock.unlock()
     }
 
     public func getString(for key: KeychainKey) throws -> String? {

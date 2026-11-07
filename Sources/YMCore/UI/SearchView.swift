@@ -11,6 +11,7 @@ public struct SearchView: View {
     @UIState private var currentPage = 0
     @UIState private var canLoadMore = true
     @UIState private var isLoadingMore = false
+    @UIState private var searchTask: Task<Void, Never>? = nil
 
     @UIState private var audioEngine = AudioPlayerEngine.shared
     @UIState private var coordinator = NavigationCoordinator.shared
@@ -80,6 +81,19 @@ public struct SearchView: View {
 
             Divider()
                 .padding(.horizontal, 24)
+
+            if let error = errorMessage {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .foregroundStyle(Color.red)
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(Color.red)
+                    Spacer()
+                }
+                .padding(.horizontal, 24)
+                .padding(.top, 8)
+            }
 
             // Content Area
             if isSearching && searchResults.isEmpty {
@@ -219,15 +233,17 @@ public struct SearchView: View {
         let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
+        searchTask?.cancel()
         isSearching = true
         hasSearched = true
         errorMessage = nil
         currentPage = 0
         canLoadMore = true
 
-        Task {
+        searchTask = Task {
             do {
                 let results = try await networkClient.searchTracks(query: trimmed, page: 0)
+                guard !Task.isCancelled else { return }
                 await MainActor.run {
                     self.searchResults = results
                     self.isSearching = false
@@ -236,6 +252,7 @@ public struct SearchView: View {
                     }
                 }
             } catch {
+                guard !Task.isCancelled else { return }
                 await MainActor.run {
                     self.errorMessage = error.localizedDescription
                     self.isSearching = false

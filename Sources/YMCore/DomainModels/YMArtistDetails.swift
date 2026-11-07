@@ -69,12 +69,16 @@ public struct YMArtistStats: Codable, Sendable {
         self.lastMonthListenersDelta = lastMonthListenersDelta
     }
 
-    public var formattedListeners: String {
-        guard let count = lastMonthListeners, count > 0 else { return "" }
+    private static let listenersFormatter: NumberFormatter = {
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
         formatter.groupingSeparator = " "
-        let formattedNumber = formatter.string(from: NSNumber(value: count)) ?? "\(count)"
+        return formatter
+    }()
+
+    public var formattedListeners: String {
+        guard let count = lastMonthListeners, count > 0 else { return "" }
+        let formattedNumber = Self.listenersFormatter.string(from: NSNumber(value: count)) ?? "\(count)"
         return "\(formattedNumber) слушателей за месяц"
     }
 }

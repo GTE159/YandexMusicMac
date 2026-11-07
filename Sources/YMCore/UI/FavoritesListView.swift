@@ -211,8 +211,20 @@ public struct FavoritesListView: View {
                         tracks: displayedTracks,
                         onPlayTrack: { track in
                             audioEngine.isWaveMode = false
-                            if let idx = displayedTracks.firstIndex(where: { $0.id == track.id }) {
-                                audioEngine.setQueue(displayedTracks, startingAt: idx)
+                            let playable = displayedTracks.filter { !$0.isPlaceholder && !$0.isSpacer }
+                            if let idx = playable.firstIndex(where: { $0.id == track.id }) {
+                                audioEngine.setQueue(playable, startingAt: idx)
+                            } else {
+                                Task {
+                                    if let resolved = await likesService.fetchTrackImmediately(trackId: track.id) {
+                                        let updatedPlayable = displayedTracks.filter { !$0.isPlaceholder && !$0.isSpacer }
+                                        if let newIdx = updatedPlayable.firstIndex(where: { $0.id == resolved.id }) {
+                                            audioEngine.setQueue(updatedPlayable, startingAt: newIdx)
+                                        } else {
+                                            audioEngine.setQueue([resolved], startingAt: 0)
+                                        }
+                                    }
+                                }
                             }
                         },
                         onLoadMore: {
@@ -239,11 +251,6 @@ public struct FavoritesListView: View {
         .ymScreenBackground()
         .task {
             await likesService.ensureInitialLikesLoaded()
-        }
-        .onAppear {
-            Task {
-                await likesService.ensureInitialLikesLoaded()
-            }
         }
     }
 }

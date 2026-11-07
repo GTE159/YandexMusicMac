@@ -163,54 +163,49 @@ public struct AbovePlayerLyricsBar: View {
             )
         }
         .task(id: currentTrack?.id) {
-            loadLyrics()
-        }
-        .onChange(of: currentTrack?.id) { _, _ in
-            loadLyrics()
+            await loadLyricsAsync()
         }
     }
 
-    private func loadLyrics() {
+    @MainActor
+    private func loadLyricsAsync() async {
         guard let track = currentTrack else {
             isLoading = false
             syncedLyrics = nil
             return
         }
 
+        let requestedTrackId = track.id
         isLoading = true
         errorMessage = nil
         syncedLyrics = nil
 
-        Task {
-            do {
-                if let synced = try await networkClient.fetchTrackLyricsLRC(trackId: track.id), !synced.isEmpty {
-                    await MainActor.run {
-                        self.syncedLyrics = synced
-                        self.isLoading = false
-                    }
-                    return
-                }
-            } catch {
-                // Ignore LRC failure, fall back below
+        do {
+            if let synced = try await networkClient.fetchTrackLyricsLRC(trackId: requestedTrackId), !synced.isEmpty {
+                guard !Task.isCancelled, currentTrack?.id == requestedTrackId else { return }
+                self.syncedLyrics = synced
+                self.isLoading = false
+                return
             }
+        } catch {
+            // Fallback below
+        }
 
-            // Fallback: check if supplement exists
-            do {
-                let supp = try await networkClient.fetchTrackSupplement(trackId: track.id)
-                await MainActor.run {
-                    self.isLoading = false
-                    if supp.lyrics == nil || supp.lyrics?.displayText.isEmpty == true {
-                        self.errorMessage = "Текст песни отсутствует"
-                    } else {
-                        self.errorMessage = "Караоке-синхронизация недоступна"
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    self.isLoading = false
-                    self.errorMessage = "Не удалось загрузить текст"
-                }
+        guard !Task.isCancelled, currentTrack?.id == requestedTrackId else { return }
+
+        do {
+            let supp = try await networkClient.fetchTrackSupplement(trackId: requestedTrackId)
+            guard !Task.isCancelled, currentTrack?.id == requestedTrackId else { return }
+            self.isLoading = false
+            if supp.lyrics == nil || supp.lyrics?.displayText.isEmpty == true {
+                self.errorMessage = "Текст песни отсутствует"
+            } else {
+                self.errorMessage = "Караоке-синхронизация недоступна"
             }
+        } catch {
+            guard !Task.isCancelled, currentTrack?.id == requestedTrackId else { return }
+            self.isLoading = false
+            self.errorMessage = "Не удалось загрузить текст"
         }
     }
 }

@@ -14,12 +14,12 @@ public enum YMCoverURLBuilder {
         guard let coverUri = coverUri, !coverUri.isEmpty else { return nil }
 
         var uri = coverUri.replacingOccurrences(of: "%%", with: size.rawValue)
-        if !uri.hasPrefix("http://") && !uri.hasPrefix("https://") {
-            if uri.hasPrefix("//") {
-                uri = "https:" + uri
-            } else {
-                uri = "https://" + uri
-            }
+        if uri.hasPrefix("http://") {
+            uri = "https://" + uri.dropFirst("http://".count)
+        } else if uri.hasPrefix("//") {
+            uri = "https:" + uri
+        } else if !uri.hasPrefix("https://") {
+            uri = "https://" + uri
         }
         if let url = URL(string: uri) {
             return url

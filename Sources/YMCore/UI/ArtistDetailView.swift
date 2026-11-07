@@ -247,7 +247,7 @@ public struct ArtistDetailView: View {
             .padding(.bottom, 24)
         }
         .ymScreenBackground()
-        .task {
+        .task(id: artistId) {
             loadArtistData()
         }
     }
