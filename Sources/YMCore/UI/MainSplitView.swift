@@ -308,7 +308,7 @@ public struct MainSplitView: View {
             }
             .safeAreaInset(edge: .bottom) {
                 let isAbovePlayer = coordinator.isLyricsPresented && coordinator.lyricsPosition == .abovePlayer
-                Color.clear.frame(height: 76 + (isAbovePlayer ? 78 : 0))
+                Color.clear.frame(height: 76 + (isAbovePlayer ? 74 : 0))
             }
 
             // Integrated Right-Side Lyrics Panel: full-width overlay on compact windows (< 760pt),

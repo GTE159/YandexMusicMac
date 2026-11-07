@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// Compact 3-line docked lyrics bar displayed directly above the bottom player bar.
-/// Shows: Previous line, Current line (highlighted & bold), and Next line with interactive seeking.
+/// Features a gentle vertical transparency gradient (no solid plate or borders)
+/// with the active and neighboring lines perfectly centered over the playback controls.
 public struct AbovePlayerLyricsBar: View {
     @UIState private var coordinator = NavigationCoordinator.shared
     @UIState private var audioEngine = AudioPlayerEngine.shared
@@ -45,38 +46,14 @@ public struct AbovePlayerLyricsBar: View {
         return synced.lines[nextIdx]
     }
 
+    private var baseGradientColor: Color {
+        YMTheme.isLight ? YMTheme.bg : Color.black
+    }
+
     public var body: some View {
-        HStack(spacing: 16) {
-            // Left: Mini Track Information (hidden in mini mode)
-            if !windowState.isMiniWidth, let track = currentTrack {
-                HStack(spacing: 8) {
-                    CachedCoverImage(
-                        coverUri: track.effectiveCoverUri,
-                        size: .small,
-                        displaySize: 34,
-                        cornerRadius: 4
-                    )
-                    .shadow(color: YMTheme.shadowColor, radius: 3, x: 0, y: 1)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(track.displayTitle)
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(YMTheme.fg)
-                            .lineLimit(1)
-
-                        Text(track.artistsString)
-                            .font(.system(size: 10))
-                            .foregroundStyle(YMTheme.fg60)
-                            .lineLimit(1)
-                    }
-                }
-                .frame(width: windowState.isCompactWidth ? 110 : 160, alignment: .leading)
-            }
-
-            Spacer(minLength: 4)
-
-            // Center: 3 Synchronized Karaoke Lines (Previous, Active, Next)
-            VStack(spacing: 2) {
+        ZStack(alignment: .center) {
+            // Center: 3 Synchronized Karaoke Lines positioned directly over the Play/Pause button
+            VStack(spacing: 3) {
                 // Line 1: Previous Line
                 if let prev = prevLine {
                     Button {
@@ -86,6 +63,7 @@ public struct AbovePlayerLyricsBar: View {
                             .font(.system(size: 11, weight: .medium, design: .rounded))
                             .foregroundStyle(YMTheme.fg40)
                             .lineLimit(1)
+                            .multilineTextAlignment(.center)
                     }
                     .buttonStyle(.plain)
                     .help("Перемотать к предыдущей строке")
@@ -94,32 +72,35 @@ public struct AbovePlayerLyricsBar: View {
                         .font(.system(size: 11))
                 }
 
-                // Line 2: Active Line (Enlarged, Bold, Accent Colored)
+                // Line 2: Active Line (Centered, Bold, Accent Colored with glow)
                 if isLoading {
                     HStack(spacing: 6) {
                         ProgressView()
-                            .scaleEffect(0.7)
+                            .scaleEffect(0.65)
                         Text("Загрузка текста песни...")
                             .font(.system(size: 13, weight: .medium, design: .rounded))
                             .foregroundStyle(YMTheme.fg60)
                     }
                 } else if let curr = currLine {
                     Text(curr.text)
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
                         .foregroundStyle(YMTheme.accent)
                         .shadow(color: YMTheme.accent.opacity(YMTheme.isLight ? 0.22 : 0.35), radius: 6, x: 0, y: 0)
                         .lineLimit(1)
+                        .multilineTextAlignment(.center)
                         .id(curr.id)
                 } else if let error = errorMessage {
                     Text(error)
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(YMTheme.fg60)
                         .lineLimit(1)
+                        .multilineTextAlignment(.center)
                 } else {
                     Text("Текст песни для этого трека недоступен")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(YMTheme.fg60)
                         .lineLimit(1)
+                        .multilineTextAlignment(.center)
                 }
 
                 // Line 3: Next Line
@@ -131,6 +112,7 @@ public struct AbovePlayerLyricsBar: View {
                             .font(.system(size: 11, weight: .medium, design: .rounded))
                             .foregroundStyle(YMTheme.fg40)
                             .lineLimit(1)
+                            .multilineTextAlignment(.center)
                     }
                     .buttonStyle(.plain)
                     .help("Перемотать к следующей строке")
@@ -139,13 +121,14 @@ public struct AbovePlayerLyricsBar: View {
                         .font(.system(size: 11))
                 }
             }
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: 580)
+            .padding(.horizontal, 48)
             .animation(.easeInOut(duration: 0.22), value: activeLineIndex)
 
-            Spacer(minLength: 4)
+            // Right: Subtle Close Button pinned to trailing edge (does not displace center alignment)
+            HStack {
+                Spacer()
 
-            // Right: Close Button
-            HStack(spacing: 8) {
                 Button {
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                         coordinator.isLyricsPresented = false
@@ -160,35 +143,24 @@ public struct AbovePlayerLyricsBar: View {
                 }
                 .buttonStyle(.plain)
                 .help("Закрыть текст песни (Esc)")
+                .padding(.trailing, windowState.isCompactWidth ? 12 : 20)
             }
-            .frame(width: windowState.isMiniWidth ? 30 : 60, alignment: .trailing)
         }
-        .padding(.horizontal, windowState.isCompactWidth ? 12 : 20)
-        .padding(.vertical, 6)
-        .frame(height: 78)
+        .padding(.vertical, 4)
+        .frame(height: 74)
         .frame(maxWidth: .infinity)
         .background {
-            ZStack(alignment: .top) {
-                VisualEffectBlur(material: .headerView, blendingMode: .withinWindow)
-
-                LinearGradient(
-                    colors: [
-                        YMTheme.playerBg.opacity(0.92),
-                        YMTheme.playerBg.opacity(0.98),
-                        YMTheme.playerBg
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            }
-        }
-        .overlay(alignment: .top) {
-            YMTheme.border
-                .frame(height: 1)
-        }
-        .overlay(alignment: .bottom) {
-            YMTheme.border.opacity(0.5)
-                .frame(height: 1)
+            // Light, airy vertical gradient fading down to the player bar without boxed plate borders
+            LinearGradient(
+                stops: [
+                    .init(color: baseGradientColor.opacity(0.0), location: 0.0),
+                    .init(color: baseGradientColor.opacity(0.20), location: 0.30),
+                    .init(color: baseGradientColor.opacity(0.60), location: 0.70),
+                    .init(color: baseGradientColor.opacity(0.90), location: 1.0)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
         }
         .task(id: currentTrack?.id) {
             loadLyrics()

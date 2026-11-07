@@ -50,9 +50,10 @@ public struct LyricsSheetView: View {
             LinearGradient(
                 stops: [
                     .init(color: baseGradientColor.opacity(0.0), location: 0.0),
-                    .init(color: baseGradientColor.opacity(0.45), location: 0.05),
-                    .init(color: baseGradientColor.opacity(0.85), location: 0.12),
-                    .init(color: baseGradientColor.opacity(0.96), location: 0.22),
+                    .init(color: baseGradientColor.opacity(0.20), location: 0.08),
+                    .init(color: baseGradientColor.opacity(0.55), location: 0.22),
+                    .init(color: baseGradientColor.opacity(0.85), location: 0.42),
+                    .init(color: baseGradientColor.opacity(0.96), location: 0.65),
                     .init(color: baseGradientColor.opacity(0.98), location: 1.0)
                 ],
                 startPoint: .leading,
