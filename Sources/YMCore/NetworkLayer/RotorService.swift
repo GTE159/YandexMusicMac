@@ -69,9 +69,7 @@ public actor RotorService {
     ) async throws -> [YMTrack] {
         resetSession()
         self.activeContext = context
-        if let vibe {
-            self.activeVibe = vibe
-        }
+        self.activeVibe = vibe ?? .defaultWave
 
         var effectiveSeeds = context.seeds
         if let vibeSeed = activeVibe.seedParameter {
@@ -144,7 +142,7 @@ public actor RotorService {
         var response: YMRotorStationTracksResult?
         do {
             response = try await networkClient.request(
-                endpoint: "/rotor/station/\(context.fallbackStationId)/tracks",
+                endpoint: "/rotor/station/\(YMNetworkClient.escapePath(context.fallbackStationId))/tracks",
                 queryItems: queryItems,
                 cachePolicy: .reloadIgnoringLocalCacheData
             )
@@ -194,7 +192,7 @@ public actor RotorService {
                 let body = try encoder.encode(payload)
 
                 let result: YMRotorStationTracksResult = try await networkClient.request(
-                    endpoint: "/rotor/session/\(sessionId)/tracks",
+                    endpoint: "/rotor/session/\(YMNetworkClient.escapePath(sessionId))/tracks",
                     method: "POST",
                     body: body,
                     headers: ["Content-Type": "application/json"],
@@ -224,7 +222,7 @@ public actor RotorService {
         var response: YMRotorStationTracksResult?
         do {
             response = try await networkClient.request(
-                endpoint: "/rotor/station/\(activeContext.fallbackStationId)/tracks",
+                endpoint: "/rotor/station/\(YMNetworkClient.escapePath(activeContext.fallbackStationId))/tracks",
                 queryItems: queryItems,
                 cachePolicy: .reloadIgnoringLocalCacheData
             )
@@ -254,9 +252,11 @@ public actor RotorService {
             let cleanId = track.id.components(separatedBy: ":").first ?? track.id
             if !seenTrackIds.contains(cleanId) && !seenTrackIds.contains(track.id) {
                 seenTrackIds.insert(cleanId)
-                seenTrackIds.insert(track.id)
                 seenTrackIdList.append(cleanId)
-                seenTrackIdList.append(track.id)
+                if track.id != cleanId {
+                    seenTrackIds.insert(track.id)
+                    seenTrackIdList.append(track.id)
+                }
                 recentQueueIdentifiers.append(track.rotorTrackIdentifier)
                 result.append(track)
             }
@@ -325,7 +325,7 @@ public actor RotorService {
             let v2Payload = YMRotorSessionFeedbackRequest(event: event, batchId: currentBatchId)
             let body = try encoder.encode(v2Payload)
             let _: (Data, HTTPURLResponse) = try await networkClient.performRawRequest(
-                endpoint: "/rotor/session/\(sessionId)/feedback",
+                endpoint: "/rotor/session/\(YMNetworkClient.escapePath(sessionId))/feedback",
                 method: "POST",
                 body: body,
                 headers: ["Content-Type": "application/json"]
@@ -346,7 +346,7 @@ public actor RotorService {
         ]
 
         let _: (Data, HTTPURLResponse) = try await networkClient.performRawRequest(
-            endpoint: "/rotor/station/\(activeContext.fallbackStationId)/feedback",
+            endpoint: "/rotor/station/\(YMNetworkClient.escapePath(activeContext.fallbackStationId))/feedback",
             method: "POST",
             queryItems: queryItems,
             body: body,

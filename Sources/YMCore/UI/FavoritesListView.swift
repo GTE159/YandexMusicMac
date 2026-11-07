@@ -252,5 +252,12 @@ public struct FavoritesListView: View {
         .task {
             await likesService.ensureInitialLikesLoaded()
         }
+        .task(id: filterQuery) {
+            let trimmed = filterQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled else { return }
+            await likesService.ensureAllLikedTracksLoadedForSearch()
+        }
     }
 }

@@ -9,6 +9,7 @@ public struct PlaylistsView: View {
     @UIState private var isLoadingTracks = false
     @UIState private var errorMessage: String? = nil
     @UIState private var playlistFilterQuery: String = ""
+    @UIState private var playlistDetailTask: Task<Void, Never>? = nil
 
     @UIState private var audioEngine = AudioPlayerEngine.shared
     @UIState private var windowState = WindowState.shared
@@ -158,9 +159,11 @@ public struct PlaylistsView: View {
                 // Top Navigation Bar
                 HStack(spacing: 12) {
                     Button {
+                        playlistDetailTask?.cancel()
                         selectedPlaylist = nil
                         playlistTracks = []
                         playlistFilterQuery = ""
+                        errorMessage = nil
                     } label: {
                         HStack(spacing: 4) {
                             Image(systemName: "chevron.left")
@@ -348,11 +351,14 @@ public struct PlaylistsView: View {
     }
 
     private func selectPlaylist(_ playlist: YMPlaylist) {
+        playlistDetailTask?.cancel()
         selectedPlaylist = playlist
         playlistTracks = []
         isLoadingTracks = true
+        errorMessage = nil
+        let targetPlaylistId = playlist.id
 
-        Task {
+        playlistDetailTask = Task {
             do {
                 let details = try await networkClient.fetchPlaylistDetails(uid: playlist.uid, kind: playlist.kind)
                 var resolvedTracks: [YMTrack] = []
@@ -364,12 +370,17 @@ public struct PlaylistsView: View {
                     }
                 }
 
+                guard !Task.isCancelled else { return }
                 await MainActor.run {
+                    guard self.selectedPlaylist?.id == targetPlaylistId else { return }
                     self.playlistTracks = resolvedTracks
                     self.isLoadingTracks = false
                 }
             } catch {
+                guard !Task.isCancelled else { return }
                 await MainActor.run {
+                    guard self.selectedPlaylist?.id == targetPlaylistId else { return }
+                    self.errorMessage = "Не удалось загрузить плейлист: \(error.localizedDescription)"
                     self.isLoadingTracks = false
                 }
             }

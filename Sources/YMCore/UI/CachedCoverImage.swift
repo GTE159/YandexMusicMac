@@ -39,8 +39,12 @@ public struct CachedCoverImage: View {
         }
         .frame(width: displaySize, height: displaySize)
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
-        .task(id: coverUri) {
-            loadedImage = await ImagePipeline.shared.image(for: coverUri, size: size)
+        .task(id: "\(coverUri ?? "")_\(size.rawValue)") {
+            loadedImage = nil
+            guard let coverUri = coverUri, !coverUri.isEmpty else { return }
+            let image = await ImagePipeline.shared.image(for: coverUri, size: size)
+            guard !Task.isCancelled else { return }
+            loadedImage = image
         }
     }
 }

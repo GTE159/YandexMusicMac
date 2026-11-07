@@ -8,6 +8,7 @@ public struct AlbumDetailView: View {
     @UIState private var album: YMAlbumWithTracks? = nil
     @UIState private var isLoading = true
     @UIState private var errorMessage: String? = nil
+    @UIState private var loadTask: Task<Void, Never>? = nil
 
     @UIState private var audioEngine = AudioPlayerEngine.shared
     @UIState private var coordinator = NavigationCoordinator.shared
@@ -116,6 +117,7 @@ public struct AlbumDetailView: View {
                         // Action Bar
                         HStack(spacing: 12) {
                             Button {
+                                audioEngine.isWaveMode = false
                                 audioEngine.assignQueue(album.allTracks, startingAt: 0)
                             } label: {
                                 Label("Слушать альбом", systemImage: "play.fill")
@@ -137,6 +139,7 @@ public struct AlbumDetailView: View {
                 TrackTableView(
                     tracks: album.allTracks,
                     onPlayTrack: { selectedTrack in
+                        audioEngine.isWaveMode = false
                         if let index = album.allTracks.firstIndex(where: { $0.id == selectedTrack.id }) {
                             audioEngine.assignQueue(album.allTracks, startingAt: index)
                         } else {
@@ -154,17 +157,23 @@ public struct AlbumDetailView: View {
     }
 
     private func loadAlbumData() {
+        loadTask?.cancel()
         isLoading = true
         errorMessage = nil
-        Task {
+        let targetAlbumId = albumId
+        loadTask = Task {
             do {
-                let fetched = try await networkClient.fetchAlbumWithTracks(albumId: albumId)
+                let fetched = try await networkClient.fetchAlbumWithTracks(albumId: targetAlbumId)
+                guard !Task.isCancelled else { return }
                 await MainActor.run {
+                    guard self.albumId == targetAlbumId else { return }
                     self.album = fetched
                     self.isLoading = false
                 }
             } catch {
+                guard !Task.isCancelled else { return }
                 await MainActor.run {
+                    guard self.albumId == targetAlbumId else { return }
                     self.errorMessage = "Не удалось загрузить альбом: \(error.localizedDescription)"
                     self.isLoading = false
                 }

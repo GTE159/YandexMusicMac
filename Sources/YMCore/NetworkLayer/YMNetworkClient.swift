@@ -190,7 +190,8 @@ public actor YMNetworkClient {
 
     /// Step 1: GET /tracks/{trackId}/download-info -> Pick MP3 320kbps
     public func getDownloadInfo(for trackId: String) async throws -> [YMDownloadInfo] {
-        try await request(endpoint: "/tracks/\(Self.escapePath(trackId))/download-info")
+        let cleanTrackId = trackId.components(separatedBy: ":").first ?? trackId
+        return try await request(endpoint: "/tracks/\(Self.escapePath(cleanTrackId))/download-info")
     }
 
     /// Step 2: GET {downloadInfoUrl}&format=json -> Parse host, path, ts, s
@@ -437,35 +438,36 @@ public actor YMNetworkClient {
         specificInfo: YMDownloadInfo? = nil,
         forceRefresh: Bool = false
     ) async throws -> YMResolvedAudioStream {
+        let cleanTrackId = trackId.components(separatedBy: ":").first ?? trackId
         if forceRefresh {
-            streamInfosCache.removeValue(forKey: trackId)
+            streamInfosCache.removeValue(forKey: cleanTrackId)
         }
 
         let allOptions: [YMDownloadInfo]
 
         if !forceRefresh,
-           let cached = streamInfosCache[trackId],
+           let cached = streamInfosCache[cleanTrackId],
            Date().timeIntervalSince(cached.timestamp) < streamCacheTTL,
            !cached.infos.isEmpty {
             allOptions = cached.infos
         } else {
             async let catalogTask: [YMDownloadInfo] = {
                 do {
-                    let catalog = try await getDownloadInfo(for: trackId)
+                    let catalog = try await getDownloadInfo(for: cleanTrackId)
                     // Оставляем все поддерживаемые потоки каталога (MP3 320/192/128, AAC 192/64), отсеивая только flac
                     return catalog.filter { !($0.codec.lowercased().contains("flac")) }
                 } catch {
-                    print("[YMNetworkClient] getDownloadInfo error for \(trackId): \(error)")
+                    print("[YMNetworkClient] getDownloadInfo error for \(cleanTrackId): \(error)")
                     return []
                 }
             }()
 
             // Запрашиваем конкретные кодеки с quality="lossless" — это стандартный способ получить от /get-file-info
             // максимальный поток для каждого кодека (FLAC, MP3 320k, AAC, HE-AAC) без ошибок валидации подписи.
-            async let flacTask = fetchFileInfoStream(trackId: trackId, quality: "lossless", codecs: "flac,flac-mp4", expectedBitrateHint: 1000)
-            async let mp3HqTask = fetchFileInfoStream(trackId: trackId, quality: "lossless", codecs: "mp3", expectedBitrateHint: 320)
-            async let aacHqTask = fetchFileInfoStream(trackId: trackId, quality: "lossless", codecs: "aac,aac-mp4", expectedBitrateHint: 256)
-            async let heAacTask = fetchFileInfoStream(trackId: trackId, quality: "lossless", codecs: "he-aac,he-aac-mp4", expectedBitrateHint: 64)
+            async let flacTask = fetchFileInfoStream(trackId: cleanTrackId, quality: "lossless", codecs: "flac,flac-mp4", expectedBitrateHint: 1000)
+            async let mp3HqTask = fetchFileInfoStream(trackId: cleanTrackId, quality: "lossless", codecs: "mp3", expectedBitrateHint: 320)
+            async let aacHqTask = fetchFileInfoStream(trackId: cleanTrackId, quality: "lossless", codecs: "aac,aac-mp4", expectedBitrateHint: 256)
+            async let heAacTask = fetchFileInfoStream(trackId: cleanTrackId, quality: "lossless", codecs: "he-aac,he-aac-mp4", expectedBitrateHint: 64)
 
             let (catalogInfos, flacInfo, mp3HqInfo, aacHqInfo, heAacInfo) = await (
                 catalogTask,
@@ -527,7 +529,7 @@ public actor YMNetworkClient {
                 }
             }
             if !sortedOptions.isEmpty {
-                streamInfosCache[trackId] = CachedStreamInfos(timestamp: Date(), infos: sortedOptions)
+                streamInfosCache[cleanTrackId] = CachedStreamInfos(timestamp: Date(), infos: sortedOptions)
             }
         }
 
@@ -586,6 +588,7 @@ public actor YMNetworkClient {
         guard !trackIds.isEmpty else { return [] }
         let chunkSize = 50
         var allTracks: [YMTrack] = []
+        var lastError: Error?
 
         for chunkStart in stride(from: 0, to: trackIds.count, by: chunkSize) {
             let chunkEnd = min(chunkStart + chunkSize, trackIds.count)
@@ -603,8 +606,13 @@ public actor YMNetworkClient {
                 )
                 allTracks.append(contentsOf: chunkTracks)
             } catch {
+                lastError = error
                 print("[YMNetworkClient] Error fetching track chunk [\(chunkStart)..<\(chunkEnd)]: \(error)")
             }
+        }
+
+        if allTracks.isEmpty, let error = lastError {
+            throw error
         }
 
         return allTracks
@@ -706,8 +714,13 @@ public actor YMNetworkClient {
             return nil
         }
 
-        guard let downloadUrl = envelope.downloadUrl, !downloadUrl.isEmpty,
-              let s3URL = URL(string: downloadUrl) else {
+        guard var downloadUrl = envelope.downloadUrl, !downloadUrl.isEmpty else {
+            return nil
+        }
+        if downloadUrl.hasPrefix("http://") {
+            downloadUrl = "https://" + downloadUrl.dropFirst("http://".count)
+        }
+        guard let s3URL = URL(string: downloadUrl) else {
             return nil
         }
 

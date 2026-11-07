@@ -17,6 +17,7 @@ public struct MyWaveView: View {
     @UIState private var errorMessage: String? = nil
     @UIState private var toastMessage: String? = nil
     @UIState private var toastDismissTask: Task<Void, Never>? = nil
+    @UIState private var waveStartTask: Task<Void, Never>? = nil
 
     @UIState private var isFlameActive: Bool = false
     @UIState private var wavePulse: CGFloat = 1.0
@@ -546,12 +547,14 @@ public struct MyWaveView: View {
     // MARK: - Wave Logic & Telemetry
 
     private func startWave(context: YMWaveContext, vibe: YMWaveVibePreset) {
+        waveStartTask?.cancel()
         isLoadingWave = true
         errorMessage = nil
 
-        Task {
+        waveStartTask = Task {
             do {
                 let initialTracks = try await rotorService.startWave(context: context, vibe: vibe)
+                guard !Task.isCancelled else { return }
                 await MainActor.run {
                     self.waveTracks = initialTracks
                     self.isLoadingWave = false
@@ -561,6 +564,7 @@ public struct MyWaveView: View {
                     self.audioEngine.setQueue(initialTracks, startingAt: 0)
                 }
             } catch {
+                guard !Task.isCancelled else { return }
                 await MainActor.run {
                     self.isLoadingWave = false
                     self.errorMessage = error.localizedDescription
@@ -570,26 +574,26 @@ public struct MyWaveView: View {
     }
 
     private func loadMoreTracks() async {
-        guard !isLoadingMoreWave, let lastTrack = waveTracks.last else { return }
+        let currentList = displayedWaveTracks
+        guard !isLoadingMoreWave, let lastTrack = currentList.last else { return }
         isLoadingMoreWave = true
+        defer { isLoadingMoreWave = false }
 
-        let history = Array(waveTracks.suffix(5)).map(\.rotorTrackIdentifier)
+        let history = Array(currentList.suffix(25)).map(\.rotorTrackIdentifier)
         do {
             let nextBatch = try await rotorService.fetchNextBatch(
                 lastTrackId: lastTrack.rotorTrackIdentifier,
                 queueHistory: history
             )
-            await MainActor.run {
-                let existingIds = Set(self.waveTracks.map(\.id))
-                let newUnique = nextBatch.filter { !existingIds.contains($0.id) }
-                self.waveTracks.append(contentsOf: newUnique)
-                self.audioEngine.appendToQueue(newUnique)
-                self.isLoadingMoreWave = false
+            guard !nextBatch.isEmpty else { return }
+            if audioEngine.isWaveMode {
+                audioEngine.appendToQueue(nextBatch)
+                waveTracks = audioEngine.queue
+            } else {
+                waveTracks.append(contentsOf: nextBatch)
             }
         } catch {
-            await MainActor.run {
-                self.isLoadingMoreWave = false
-            }
+            print("[MyWaveView] Error loading more wave tracks: \(error)")
         }
     }
 

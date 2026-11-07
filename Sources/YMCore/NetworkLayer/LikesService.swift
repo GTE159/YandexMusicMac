@@ -134,13 +134,13 @@ public final class LikesService {
         defer { self.isSyncing = false }
 
         let response: YMLikesLibraryResponse = try await networkClient.request(
-            endpoint: "/users/\(resolvedUid)/likes/tracks",
+            endpoint: "/users/\(YMNetworkClient.escapePath(resolvedUid))/likes/tracks",
             cachePolicy: .reloadIgnoringLocalCacheData
         )
 
         self.allLikedItems = response.allLikedItems
         self.likedTrackIds = Set(allLikedItems.map(\.id))
-        self.hasMoreLikes = self.likedTracks.contains { $0.isPlaceholder }
+        self.hasMoreLikes = self.likedTracks.count < self.allLikedItems.count || self.likedTracks.contains(where: \.isPlaceholder)
     }
 
     /// Ensures user's liked collection is loaded on demand without requiring manual refresh.
@@ -636,11 +636,12 @@ public final class LikesService {
     private func addLike(trackId: String, albumId: String? = nil) async throws {
         guard let uid = AuthService.shared.currentUser?.userId ?? keychain.getUserId() else { return }
         let cleanId = extractCleanId(from: trackId)
+        let escapedUid = YMNetworkClient.escapePath(uid)
 
         let cleanBody = "track-ids=\(cleanId)".data(using: .utf8)
         do {
             let _: (Data, HTTPURLResponse) = try await networkClient.performRawRequest(
-                endpoint: "/users/\(uid)/likes/tracks/add-multiple",
+                endpoint: "/users/\(escapedUid)/likes/tracks/add-multiple",
                 method: "POST",
                 body: cleanBody,
                 headers: ["Content-Type": "application/x-www-form-urlencoded"]
@@ -654,7 +655,7 @@ public final class LikesService {
             let albumBody = "track-ids=\(cleanId):\(albumId)".data(using: .utf8)
             do {
                 let _: (Data, HTTPURLResponse) = try await networkClient.performRawRequest(
-                    endpoint: "/users/\(uid)/likes/tracks/add-multiple",
+                    endpoint: "/users/\(escapedUid)/likes/tracks/add-multiple",
                     method: "POST",
                     body: albumBody,
                     headers: ["Content-Type": "application/x-www-form-urlencoded"]
@@ -666,7 +667,7 @@ public final class LikesService {
 
             let jointBody = "track-ids=\(cleanId)&track-ids=\(cleanId):\(albumId)".data(using: .utf8)
             let _: (Data, HTTPURLResponse) = try await networkClient.performRawRequest(
-                endpoint: "/users/\(uid)/likes/tracks/add-multiple",
+                endpoint: "/users/\(escapedUid)/likes/tracks/add-multiple",
                 method: "POST",
                 body: jointBody,
                 headers: ["Content-Type": "application/x-www-form-urlencoded"]
@@ -677,13 +678,14 @@ public final class LikesService {
     private func removeLike(trackId: String, albumId: String? = nil) async throws {
         guard let uid = AuthService.shared.currentUser?.userId ?? keychain.getUserId() else { return }
         let cleanId = extractCleanId(from: trackId)
+        let escapedUid = YMNetworkClient.escapePath(uid)
 
         // В Yandex Music API эндпоинт для снятия отметки «Мне нравится» — строго /remove (НЕ /remove-multiple)
         // 1. Сначала отправляем чистый числовой ID трека, так как именно он хранится в базе библиотеки
         let cleanBody = "track-ids=\(cleanId)".data(using: .utf8)
         do {
             let _: (Data, HTTPURLResponse) = try await networkClient.performRawRequest(
-                endpoint: "/users/\(uid)/likes/tracks/remove",
+                endpoint: "/users/\(escapedUid)/likes/tracks/remove",
                 method: "POST",
                 body: cleanBody,
                 headers: ["Content-Type": "application/x-www-form-urlencoded"],
@@ -699,7 +701,7 @@ public final class LikesService {
             let albumBody = "track-ids=\(cleanId):\(albumId)".data(using: .utf8)
             do {
                 let _: (Data, HTTPURLResponse) = try await networkClient.performRawRequest(
-                    endpoint: "/users/\(uid)/likes/tracks/remove",
+                    endpoint: "/users/\(escapedUid)/likes/tracks/remove",
                     method: "POST",
                     body: albumBody,
                     headers: ["Content-Type": "application/x-www-form-urlencoded"],
@@ -713,7 +715,7 @@ public final class LikesService {
             // 3. Пробуем передать оба формата через x-www-form-urlencoded (&track-ids=...)
             let jointBody = "track-ids=\(cleanId)&track-ids=\(cleanId):\(albumId)".data(using: .utf8)
             let _: (Data, HTTPURLResponse) = try await networkClient.performRawRequest(
-                endpoint: "/users/\(uid)/likes/tracks/remove",
+                endpoint: "/users/\(escapedUid)/likes/tracks/remove",
                 method: "POST",
                 body: jointBody,
                 headers: ["Content-Type": "application/x-www-form-urlencoded"],

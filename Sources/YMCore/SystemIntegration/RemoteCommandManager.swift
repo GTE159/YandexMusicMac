@@ -111,7 +111,11 @@ public final class RemoteCommandManager {
         commandCenter.likeCommand.localizedTitle = "Мне нравится"
         commandCenter.likeCommand.addTarget { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.onLikeToggled?()
+                if let onLikeToggled = self?.onLikeToggled {
+                    onLikeToggled()
+                } else if let currentTrack = self?.playerEngine?.currentTrack {
+                    await LikesService.shared.toggleLike(track: currentTrack)
+                }
             }
             return .success
         }

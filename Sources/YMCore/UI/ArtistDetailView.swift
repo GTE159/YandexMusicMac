@@ -8,6 +8,7 @@ public struct ArtistDetailView: View {
     @UIState private var briefInfo: YMArtistBriefInfo? = nil
     @UIState private var isLoading = true
     @UIState private var errorMessage: String? = nil
+    @UIState private var loadTask: Task<Void, Never>? = nil
 
     @UIState private var audioEngine = AudioPlayerEngine.shared
     @UIState private var likesService = LikesService.shared
@@ -106,6 +107,7 @@ public struct ArtistDetailView: View {
                             HStack(spacing: 12) {
                                 if !info.popularTracks.isEmpty {
                                     Button {
+                                        audioEngine.isWaveMode = false
                                         audioEngine.assignQueue(info.popularTracks, startingAt: 0)
                                     } label: {
                                         Label("Слушать популярное", systemImage: "play.fill")
@@ -136,6 +138,7 @@ public struct ArtistDetailView: View {
                             TrackTableView(
                                 tracks: Array(info.popularTracks.prefix(10)),
                                 onPlayTrack: { track in
+                                    audioEngine.isWaveMode = false
                                     if let index = info.popularTracks.firstIndex(where: { $0.id == track.id }) {
                                         audioEngine.assignQueue(info.popularTracks, startingAt: index)
                                     }
@@ -161,6 +164,7 @@ public struct ArtistDetailView: View {
                                             // Play album
                                             Task {
                                                 if let fullAlbum = try? await networkClient.fetchAlbumWithTracks(albumId: album.id) {
+                                                    audioEngine.isWaveMode = false
                                                     audioEngine.assignQueue(fullAlbum.allTracks, startingAt: 0)
                                                 }
                                             }
@@ -188,6 +192,7 @@ public struct ArtistDetailView: View {
                                         YMAlbumCard(album: album) {
                                             Task {
                                                 if let fullAlbum = try? await networkClient.fetchAlbumWithTracks(albumId: album.id) {
+                                                    audioEngine.isWaveMode = false
                                                     audioEngine.assignQueue(fullAlbum.allTracks, startingAt: 0)
                                                 }
                                             }
@@ -253,17 +258,23 @@ public struct ArtistDetailView: View {
     }
 
     private func loadArtistData() {
+        loadTask?.cancel()
         isLoading = true
         errorMessage = nil
-        Task {
+        let targetArtistId = artistId
+        loadTask = Task {
             do {
-                let info = try await networkClient.fetchArtistBriefInfo(artistId: artistId)
+                let info = try await networkClient.fetchArtistBriefInfo(artistId: targetArtistId)
+                guard !Task.isCancelled else { return }
                 await MainActor.run {
+                    guard self.artistId == targetArtistId else { return }
                     self.briefInfo = info
                     self.isLoading = false
                 }
             } catch {
+                guard !Task.isCancelled else { return }
                 await MainActor.run {
+                    guard self.artistId == targetArtistId else { return }
                     self.errorMessage = "Не удалось загрузить данные артиста: \(error.localizedDescription)"
                     self.isLoading = false
                 }
