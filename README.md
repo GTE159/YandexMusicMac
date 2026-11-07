@@ -88,9 +88,9 @@ cd YandexMusicMac
 
 ## Список технологий:
 
-**Язык:** Swift 6 (с активным режимом `StrictConcurrency`)
-**Интерфейс:** SwiftUI + AppKit
-**Аудиодвижок:** `AVFoundation` (`AVPlayer`, `AVPlayerItem`), кастомная очередь треков, дедупликация Rotor
-**Сетевой слой:** `URLSession` с кастомным пулингом соединений и потоковым кэшем
-**Безопасность:** macOS Keychain Services (`Security.framework`) для безопасного хранения токена
-**Тестирование:** `Swift Testing` (48 юнит-тестов ядра `YMCoreTests`)
+* **Язык:** Swift 6 (с активным режимом `StrictConcurrency`)
+* **Интерфейс:** SwiftUI + AppKit
+* **Аудиодвижок:** `AVFoundation` (`AVPlayer`, `AVPlayerItem`), кастомная очередь треков, дедупликация Rotor
+* **Сетевой слой:** `URLSession` с кастомным пулингом соединений и потоковым кэшем
+* **Безопасность:** macOS Keychain Services (`Security.framework`) для безопасного хранения токена
+* **Тестирование:** `Swift Testing` (48 юнит-тестов ядра `YMCoreTests`)
