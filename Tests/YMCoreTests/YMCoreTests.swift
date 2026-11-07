@@ -1230,5 +1230,91 @@ func testAccountStatusActiveSubscription() {
     #expect(freeStatus.hasActiveSubscription == false)
 }
 
+@Test("TrackHoverManager single source of truth and scroll suppression")
+func testTrackHoverManager() async {
+    let manager = await MainActor.run { TrackHoverManager.shared }
+    await MainActor.run {
+        manager.clear()
+        #expect(manager.isHovered(trackId: "track1") == false)
+
+        manager.setHovered("track1")
+        #expect(manager.isHovered(trackId: "track1") == true)
+        #expect(manager.isHovered(trackId: "track2") == false)
+
+        // Switching to track2 automatically clears track1
+        manager.setHovered("track2")
+        #expect(manager.isHovered(trackId: "track1") == false)
+        #expect(manager.isHovered(trackId: "track2") == true)
+
+        // Simulating scroll activity suppresses hover
+        manager.notifyScrollActivity()
+        #expect(manager.isScrolling == true)
+        #expect(manager.isHovered(trackId: "track2") == false)
+
+        // Hover events while scrolling are ignored
+        manager.setHovered("track3")
+        #expect(manager.isHovered(trackId: "track3") == false)
+
+        // Ending scroll restores capability
+        manager.notifyScrollEnded()
+        #expect(manager.isScrolling == false)
+        manager.setHovered("track3")
+        #expect(manager.isHovered(trackId: "track3") == true)
+
+        manager.clear()
+        #expect(manager.isHovered(trackId: "track3") == false)
+    }
+}
+
+@Test("Search response decoding with albums and artists blocks")
+func testSearchResponseWithAlbums() throws {
+    let json = """
+    {
+        "type": "all",
+        "page": 0,
+        "total": 1,
+        "perPage": 10,
+        "text": "test",
+        "tracks": {
+            "total": 1,
+            "results": [
+                {
+                    "id": "1001",
+                    "title": "Track One",
+                    "durationMs": 180000,
+                    "available": true
+                }
+            ]
+        },
+        "albums": {
+            "total": 1,
+            "results": [
+                {
+                    "id": "2001",
+                    "title": "Album One",
+                    "year": 2024
+                }
+            ]
+        },
+        "artists": {
+            "total": 1,
+            "results": [
+                {
+                    "id": "3001",
+                    "name": "Artist One"
+                }
+            ]
+        }
+    }
+    """
+    let data = json.data(using: .utf8)!
+    let response = try JSONDecoder().decode(YMSearchResponse.self, from: data)
+    #expect(response.tracks?.results.count == 1)
+    #expect(response.albums?.results.count == 1)
+    #expect(response.albums?.results.first?.title == "Album One")
+    #expect(response.artists?.results.count == 1)
+    #expect(response.artists?.results.first?.name == "Artist One")
+}
+
 
 

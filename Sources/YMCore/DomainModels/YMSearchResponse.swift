@@ -9,6 +9,7 @@ public struct YMSearchResponse: Codable, Sendable {
     public let tracks: YMSearchTracksBlock?
     public let best: YMSearchBestBlock?
     public let artists: YMSearchArtistsBlock?
+    public let albums: YMSearchAlbumsBlock?
 
     public init(
         type: String? = nil,
@@ -18,7 +19,8 @@ public struct YMSearchResponse: Codable, Sendable {
         text: String? = nil,
         tracks: YMSearchTracksBlock? = nil,
         best: YMSearchBestBlock? = nil,
-        artists: YMSearchArtistsBlock? = nil
+        artists: YMSearchArtistsBlock? = nil,
+        albums: YMSearchAlbumsBlock? = nil
     ) {
         self.type = type
         self.page = page
@@ -28,6 +30,40 @@ public struct YMSearchResponse: Codable, Sendable {
         self.tracks = tracks
         self.best = best
         self.artists = artists
+        self.albums = albums
+    }
+}
+
+public struct YMSearchAlbumsBlock: Codable, Sendable {
+    public let total: Int?
+    public let results: [YMAlbum]
+
+    enum CodingKeys: String, CodingKey {
+        case total
+        case results
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.total = try? container.decodeIfPresent(Int.self, forKey: .total)
+        self.results = (try? container.decodeIfPresent([YMAlbum].self, forKey: .results)) ?? []
+    }
+
+    public init(total: Int? = nil, results: [YMAlbum] = []) {
+        self.total = total
+        self.results = results
+    }
+}
+
+public struct YMFullSearchResult: Sendable {
+    public let tracks: [YMTrack]
+    public let artists: [YMArtist]
+    public let albums: [YMAlbum]
+
+    public init(tracks: [YMTrack] = [], artists: [YMArtist] = [], albums: [YMAlbum] = []) {
+        self.tracks = tracks
+        self.artists = artists
+        self.albums = albums
     }
 }
 

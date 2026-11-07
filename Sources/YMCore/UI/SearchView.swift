@@ -5,6 +5,8 @@ import SwiftUI
 public struct SearchView: View {
     @UIState private var searchText = ""
     @UIState private var searchResults: [YMTrack] = []
+    @UIState private var searchArtists: [YMArtist] = []
+    @UIState private var searchAlbums: [YMAlbum] = []
     @UIState private var isSearching = false
     @UIState private var hasSearched = false
     @UIState private var errorMessage: String? = nil
@@ -22,21 +24,6 @@ public struct SearchView: View {
     ]
 
     public init() {}
-
-    /// Extracts unique artists from current search results for the artists carousel
-    private var searchArtists: [YMArtist] {
-        var seen = Set<String>()
-        var artists: [YMArtist] = []
-        for track in searchResults {
-            for artist in track.artists {
-                if !seen.contains(artist.id) {
-                    seen.insert(artist.id)
-                    artists.append(artist)
-                }
-            }
-        }
-        return Array(artists.prefix(12))
-    }
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -57,6 +44,8 @@ public struct SearchView: View {
                     Button {
                         searchText = ""
                         searchResults = []
+                        searchArtists = []
+                        searchAlbums = []
                         hasSearched = false
                         errorMessage = nil
                         currentPage = 0
@@ -187,6 +176,47 @@ public struct SearchView: View {
                             }
                         }
 
+                        // Albums Carousel if any match
+                        if !searchAlbums.isEmpty {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("Альбомы")
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundStyle(YMTheme.fg)
+                                    .padding(.horizontal, 24)
+
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(spacing: 16) {
+                                        ForEach(searchAlbums) { album in
+                                            YMAlbumCard(
+                                                album: album,
+                                                onPlay: {
+                                                    Task {
+                                                        do {
+                                                            let albumData = try await networkClient.fetchAlbumWithTracks(albumId: album.id)
+                                                            let tracks = albumData.volumes.flatMap { $0 }
+                                                            if !tracks.isEmpty {
+                                                                await MainActor.run {
+                                                                    audioEngine.isWaveMode = false
+                                                                    audioEngine.assignQueue(tracks, startingAt: 0)
+                                                                }
+                                                            }
+                                                        } catch {
+                                                            print("[SearchView] Failed to play album: \(error)")
+                                                        }
+                                                    }
+                                                },
+                                                onSelect: {
+                                                    coordinator.navigate(to: .album(id: album.id, title: album.title))
+                                                }
+                                            )
+                                        }
+                                    }
+                                    .padding(.horizontal, 24)
+                                    .padding(.vertical, 8)
+                                }
+                            }
+                        }
+
                         // Tracks Section
                         VStack(alignment: .leading, spacing: 10) {
                             Text("Треки")
@@ -242,12 +272,14 @@ public struct SearchView: View {
 
         searchTask = Task {
             do {
-                let results = try await networkClient.searchTracks(query: trimmed, page: 0)
+                let fullResult = try await networkClient.searchAll(query: trimmed, page: 0)
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
-                    self.searchResults = results
+                    self.searchResults = fullResult.tracks
+                    self.searchArtists = fullResult.artists
+                    self.searchAlbums = fullResult.albums
                     self.isSearching = false
-                    if results.count < 20 {
+                    if fullResult.tracks.count < 20 {
                         self.canLoadMore = false
                     }
                 }

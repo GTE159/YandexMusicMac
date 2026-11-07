@@ -751,6 +751,58 @@ public actor YMNetworkClient {
         return response.similarTracks
     }
 
+    /// Comprehensive unified search returning tracks, artists, and albums:
+    /// GET /search?text={query}&type=all&page={page}&nocorrect=false
+    public func searchAll(query: String, page: Int = 0) async throws -> YMFullSearchResult {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return YMFullSearchResult(tracks: [], artists: [], albums: [])
+        }
+
+        let tracks = try await searchTracks(query: trimmed, page: page)
+
+        if page == 0 {
+            let queryItems = [
+                URLQueryItem(name: "text", value: trimmed),
+                URLQueryItem(name: "type", value: "all"),
+                URLQueryItem(name: "page", value: "0"),
+                URLQueryItem(name: "nocorrect", value: "false")
+            ]
+
+            let response: YMSearchResponse? = try? await request(endpoint: "/search", queryItems: queryItems)
+            var directAlbums = response?.albums?.results ?? []
+            var directArtists = response?.artists?.results ?? []
+
+            // Extract unique albums from tracks if directAlbums has few/none
+            var seenAlbumIds = Set(directAlbums.map(\.id))
+            for track in tracks {
+                if let album = track.albums.first, !seenAlbumIds.contains(album.id) {
+                    seenAlbumIds.insert(album.id)
+                    directAlbums.append(album)
+                }
+            }
+
+            // Extract unique artists from tracks if directArtists has few/none
+            var seenArtistIds = Set(directArtists.map(\.id))
+            for track in tracks {
+                for artist in track.artists {
+                    if !seenArtistIds.contains(artist.id) {
+                        seenArtistIds.insert(artist.id)
+                        directArtists.append(artist)
+                    }
+                }
+            }
+
+            return YMFullSearchResult(
+                tracks: tracks,
+                artists: Array(directArtists.prefix(16)),
+                albums: Array(directAlbums.prefix(16))
+            )
+        } else {
+            return YMFullSearchResult(tracks: tracks, artists: [], albums: [])
+        }
+    }
+
     /// Global search with intelligent artist resolution and track discovery:
     /// GET /search?text={query}&type=all&page={page}&nocorrect=false
     public func searchTracks(query: String, page: Int = 0) async throws -> [YMTrack] {

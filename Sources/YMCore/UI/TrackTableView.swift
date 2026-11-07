@@ -14,7 +14,6 @@ public struct TrackTableView: View {
     @UIState private var likesService = LikesService.shared
     @UIState private var coordinator = NavigationCoordinator.shared
     @UIState private var windowState = WindowState.shared
-    @UIState private var hoveredTrackId: String? = nil
 
     public init(
         tracks: [YMTrack],
@@ -48,17 +47,7 @@ public struct TrackTableView: View {
                         track: track,
                         index: index,
                         isPlaying: audioEngine.currentTrack?.id == track.id && audioEngine.isPlaying,
-                        isHovered: hoveredTrackId == track.id,
                         showAlbum: showAlbum,
-                        onHover: { isHovering in
-                            withAnimation(.easeInOut(duration: 0.08)) {
-                                if isHovering {
-                                    hoveredTrackId = track.id
-                                } else if hoveredTrackId == track.id {
-                                    hoveredTrackId = nil
-                                }
-                            }
-                        },
                         onPlay: {
                             onPlayTrack(track)
                         },
@@ -80,7 +69,7 @@ public struct TrackTableView: View {
         }
         .onHover { isInside in
             if !isInside {
-                hoveredTrackId = nil
+                TrackHoverManager.shared.clear()
             }
         }
     }
@@ -123,9 +112,7 @@ private struct ModernTrackRow: View {
     let track: YMTrack
     let index: Int
     let isPlaying: Bool
-    let isHovered: Bool
     let showAlbum: Bool
-    let onHover: (Bool) -> Void
     let onPlay: () -> Void
     let onArtistSelect: (YMArtist) -> Void
     let onAlbumSelect: (YMAlbum) -> Void
@@ -134,6 +121,11 @@ private struct ModernTrackRow: View {
     @UIState private var audioEngine = AudioPlayerEngine.shared
     @UIState private var coordinator = NavigationCoordinator.shared
     @UIState private var windowState = WindowState.shared
+    @UIState private var hoverManager = TrackHoverManager.shared
+
+    private var isHovered: Bool {
+        hoverManager.isHovered(trackId: track.id)
+    }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -274,7 +266,11 @@ private struct ModernTrackRow: View {
         )
         .contentShape(Rectangle())
         .onHover { hovering in
-            onHover(hovering)
+            if hovering {
+                hoverManager.setHovered(track.id)
+            } else if hoverManager.hoveredTrackId == track.id {
+                hoverManager.clear()
+            }
         }
         .onTapGesture(count: 2) {
             onPlay()
