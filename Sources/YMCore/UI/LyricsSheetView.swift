@@ -1,10 +1,11 @@
 import SwiftUI
 
-/// Integrated side panel for synchronized lyrics with a smooth transparent-to-black gradient,
-/// prominent active phrase typography, and no rectangular background highlight.
+/// Integrated side panel for synchronized lyrics with a smooth transparent-to-background gradient,
+/// prominent active phrase typography without line-wrapping jumps, and dynamic light/dark theming.
 public struct LyricsSheetView: View {
     @UIState private var coordinator = NavigationCoordinator.shared
     @UIState private var audioEngine = AudioPlayerEngine.shared
+    @UIState private var themeManager = YMThemeManager.shared
     @UIState private var syncedLyrics: YMSyncedLyrics? = nil
     @UIState private var supplement: YMTrackSupplement? = nil
     @UIState private var isLoading = true
@@ -22,6 +23,10 @@ public struct LyricsSheetView: View {
 
     private var activeLineIndex: Int? {
         syncedLyrics?.activeLineIndex(for: audioEngine.progressTracker.currentTime)
+    }
+
+    private var baseGradientColor: Color {
+        YMTheme.isLight ? YMTheme.bg : Color.black
     }
 
     public var body: some View {
@@ -43,12 +48,12 @@ public struct LyricsSheetView: View {
         }
         .background {
             LinearGradient(
-                colors: [
-                    Color.black.opacity(0.0),
-                    Color.black.opacity(0.25),
-                    Color.black.opacity(0.65),
-                    Color.black.opacity(0.88),
-                    Color.black.opacity(0.96)
+                stops: [
+                    .init(color: baseGradientColor.opacity(0.0), location: 0.0),
+                    .init(color: baseGradientColor.opacity(0.45), location: 0.05),
+                    .init(color: baseGradientColor.opacity(0.85), location: 0.12),
+                    .init(color: baseGradientColor.opacity(0.96), location: 0.22),
+                    .init(color: baseGradientColor.opacity(0.98), location: 1.0)
                 ],
                 startPoint: .leading,
                 endPoint: .trailing
@@ -77,23 +82,23 @@ public struct LyricsSheetView: View {
                     displaySize: 42,
                     cornerRadius: 6
                 )
-                .shadow(color: Color.black.opacity(0.4), radius: 4, x: 0, y: 2)
+                .shadow(color: YMTheme.shadowColor, radius: 4, x: 0, y: 2)
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(track.displayTitle)
                         .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(Color.white)
+                        .foregroundStyle(YMTheme.fg)
                         .lineLimit(1)
 
                     Text(track.artistsString)
                         .font(.system(size: 12))
-                        .foregroundStyle(Color.white.opacity(0.6))
+                        .foregroundStyle(YMTheme.fg60)
                         .lineLimit(1)
                 }
             } else {
                 Text("Текст песни")
                     .font(.headline)
-                    .foregroundStyle(Color.white)
+                    .foregroundStyle(YMTheme.fg)
             }
 
             Spacer()
@@ -106,9 +111,9 @@ public struct LyricsSheetView: View {
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(Color.white.opacity(0.75))
+                    .foregroundStyle(YMTheme.fg80)
                     .padding(8)
-                    .background(Circle().fill(Color.white.opacity(0.14)))
+                    .background(Circle().fill(YMTheme.surfaceComponent))
             }
             .buttonStyle(.plain)
             .keyboardShortcut(.escape, modifiers: [])
@@ -125,10 +130,10 @@ public struct LyricsSheetView: View {
     private func syncedKaraokeView(synced: YMSyncedLyrics) -> some View {
         ScrollViewReader { proxy in
             ScrollView(.vertical, showsIndicators: false) {
-                LazyVStack(alignment: .leading, spacing: 20) {
+                LazyVStack(alignment: .leading, spacing: 18) {
                     // Top clearance so first lines can be centered
                     Color.clear
-                        .frame(height: 100)
+                        .frame(height: 80)
 
                     ForEach(synced.lines) { line in
                         let isActive = line.id == activeLineIndex
@@ -138,7 +143,6 @@ public struct LyricsSheetView: View {
                             line: line,
                             isActive: isActive,
                             isPast: isPast,
-                            isPlaying: audioEngine.isPlaying,
                             onSelect: {
                                 audioEngine.seek(to: line.time)
                                 withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
@@ -149,9 +153,9 @@ public struct LyricsSheetView: View {
                         .id(line.id)
                     }
 
-                    // Bottom clearance so final lines can reach the center
+                    // Bottom clearance so final lines can reach the center and stay above player bar
                     Color.clear
-                        .frame(height: 160)
+                        .frame(height: 180)
                 }
                 .padding(.horizontal, 24)
             }
@@ -191,17 +195,15 @@ public struct LyricsSheetView: View {
                 Color.clear.frame(height: 30)
                 Text(text)
                     .font(.system(size: 20, weight: .medium, design: .rounded))
-                    .foregroundStyle(Color.white.opacity(0.8))
+                    .foregroundStyle(YMTheme.fg80)
                     .lineSpacing(10)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                Color.clear.frame(height: 60)
+                Color.clear.frame(height: 140)
             }
             .padding(.horizontal, 28)
         }
     }
-
-
 
     // MARK: - State Views
 
@@ -212,7 +214,7 @@ public struct LyricsSheetView: View {
                 .scaleEffect(1.2)
             Text("Загрузка текста песни...")
                 .font(.caption)
-                .foregroundStyle(Color.white.opacity(0.5))
+                .foregroundStyle(YMTheme.fg60)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -222,10 +224,10 @@ public struct LyricsSheetView: View {
         VStack(spacing: 12) {
             Image(systemName: "quote.bubble")
                 .font(.system(size: 36))
-                .foregroundStyle(Color.white.opacity(0.4))
+                .foregroundStyle(YMTheme.fg40)
             Text(msg)
                 .font(.subheadline)
-                .foregroundStyle(Color.white.opacity(0.7))
+                .foregroundStyle(YMTheme.fg80)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
         }
@@ -237,10 +239,10 @@ public struct LyricsSheetView: View {
         VStack(spacing: 12) {
             Image(systemName: "quote.bubble")
                 .font(.system(size: 36))
-                .foregroundStyle(Color.white.opacity(0.4))
+                .foregroundStyle(YMTheme.fg40)
             Text("К сожалению, текст для этого трека пока не добавлен в Яндекс Музыку.")
                 .font(.subheadline)
-                .foregroundStyle(Color.white.opacity(0.7))
+                .foregroundStyle(YMTheme.fg80)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
         }
@@ -301,60 +303,52 @@ private struct KaraokeLineRow: View {
     let line: SyncedLyricLine
     let isActive: Bool
     let isPast: Bool
-    let isPlaying: Bool
     let onSelect: () -> Void
 
     @UIState private var isHovered = false
 
-    private var font: Font {
-        .system(
-            size: isActive ? 32 : 19,
-            weight: isActive ? .bold : .medium,
-            design: .rounded
-        )
-    }
+    // Identical base font metrics guarantee words NEVER jump across lines when enlarging
+    private static let baseFont = Font.system(size: 24, weight: .bold, design: .rounded)
 
     private var textColor: Color {
         if isActive {
             return YMTheme.accent
         } else if isPast {
-            return Color.white.opacity(0.35)
+            return YMTheme.isLight ? YMTheme.fg.opacity(0.35) : Color.white.opacity(0.35)
         } else if isHovered {
-            return Color.white.opacity(0.9)
+            return YMTheme.fg
         } else {
-            return Color.white.opacity(0.55)
+            return YMTheme.isLight ? YMTheme.fg.opacity(0.55) : Color.white.opacity(0.55)
+        }
+    }
+
+    private var textScale: CGFloat {
+        if isActive {
+            return 1.10
+        } else if isHovered {
+            return 0.92
+        } else {
+            return 0.88
         }
     }
 
     var body: some View {
         Button(action: onSelect) {
-            HStack(alignment: .center, spacing: 14) {
-                if isActive {
-                    YMPlayingEqualizerView(
-                        color: YMTheme.accent,
-                        barWidth: 3,
-                        maxHeight: 18,
-                        isPlaying: isPlaying
-                    )
-                    .frame(width: 22)
-                    .transition(.opacity)
-                } else {
-                    Color.clear
-                        .frame(width: 22)
-                }
-
+            HStack(alignment: .center, spacing: 0) {
                 Text(line.text)
-                    .font(font)
+                    .font(Self.baseFont)
                     .foregroundStyle(textColor)
-                    .shadow(color: isActive ? YMTheme.accent.opacity(0.35) : Color.clear, radius: 8, x: 0, y: 0)
+                    .shadow(color: isActive ? YMTheme.accent.opacity(YMTheme.isLight ? 0.22 : 0.35) : Color.clear, radius: 8, x: 0, y: 0)
                     .multilineTextAlignment(.leading)
                     .lineSpacing(6)
                     .fixedSize(horizontal: false, vertical: true)
-                    .animation(.easeInOut(duration: 0.22), value: isActive)
+                    .scaleEffect(textScale, anchor: .leading)
+                    .animation(.spring(response: 0.35, dampingFraction: 0.75), value: isActive)
+                    .animation(.easeInOut(duration: 0.15), value: isHovered)
 
-                Spacer()
+                Spacer(minLength: 0)
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 20)
             .padding(.vertical, 8)
             .contentShape(Rectangle())
         }

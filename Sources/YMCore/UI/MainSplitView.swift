@@ -250,65 +250,74 @@ public struct MainSplitView: View {
     @ViewBuilder
     private var detailContent: some View {
         ZStack(alignment: .bottom) {
+            // Main Navigation Content (with dynamic bottom inset for docked bottom bars)
             GeometryReader { geo in
-                ZStack(alignment: .topTrailing) {
-                    ZStack(alignment: .topLeading) {
-                        NavigationStack(path: $coordinator.path) {
-                            Group {
-                                switch selectedSection {
-                                case .myWave:
-                                    MyWaveView()
-                                case .chart:
-                                    ChartView()
-                                case .favorites:
-                                    FavoritesListView()
-                                case .playlists:
-                                    PlaylistsView()
-                                case .search:
-                                    SearchView()
-                                case .settings:
-                                    SettingsView()
-                                }
-                            }
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .navigationDestination(for: AppRoute.self) { route in
-                                switch route {
-                                case .artist(let id, let name):
-                                    ArtistDetailView(artistId: id, artistName: name)
-                                case .album(let id, let title):
-                                    AlbumDetailView(albumId: id, albumTitle: title)
-                                }
+                ZStack(alignment: .topLeading) {
+                    NavigationStack(path: $coordinator.path) {
+                        Group {
+                            switch selectedSection {
+                            case .myWave:
+                                MyWaveView()
+                            case .chart:
+                                ChartView()
+                            case .favorites:
+                                FavoritesListView()
+                            case .playlists:
+                                PlaylistsView()
+                            case .search:
+                                SearchView()
+                            case .settings:
+                                SettingsView()
                             }
                         }
-
-                        // Sidebar Toggle Button: always visible whenever in compact window OR whenever sidebar is collapsed
-                        if windowState.isCompactWidth || columnVisibility == .detailOnly {
-                            Button {
-                                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                    columnVisibility = (columnVisibility == .detailOnly) ? .all : .detailOnly
-                                }
-                            } label: {
-                                Image(systemName: "sidebar.left")
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(YMTheme.fg80)
-                                    .padding(8)
-                                    .background(
-                                        Circle()
-                                            .fill(YMTheme.surface)
-                                            .shadow(color: Color.black.opacity(0.3), radius: 6, y: 2)
-                                    )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .navigationDestination(for: AppRoute.self) { route in
+                            switch route {
+                            case .artist(let id, let name):
+                                ArtistDetailView(artistId: id, artistName: name)
+                            case .album(let id, let title):
+                                AlbumDetailView(albumId: id, albumTitle: title)
                             }
-                            .buttonStyle(.plain)
-                            .padding(.leading, 16)
-                            .padding(.top, 16)
-                            .help("Показать/скрыть боковое меню")
                         }
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                    // Integrated Right-Side Lyrics Panel: full-width overlay on compact windows (< 760pt),
-                    // or elegant right-hand 55% side panel with seamless black gradient on wider displays.
-                    if coordinator.isLyricsPresented {
+                    // Sidebar Toggle Button: always visible whenever in compact window OR whenever sidebar is collapsed
+                    if windowState.isCompactWidth || columnVisibility == .detailOnly {
+                        Button {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                columnVisibility = (columnVisibility == .detailOnly) ? .all : .detailOnly
+                            }
+                        } label: {
+                            Image(systemName: "sidebar.left")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(YMTheme.fg80)
+                                .padding(8)
+                                .background(
+                                    Circle()
+                                        .fill(YMTheme.surface)
+                                        .shadow(color: Color.black.opacity(0.3), radius: 6, y: 2)
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.leading, 16)
+                        .padding(.top, 16)
+                        .help("Показать/скрыть боковое меню")
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .safeAreaInset(edge: .bottom) {
+                let isAbovePlayer = coordinator.isLyricsPresented && coordinator.lyricsPosition == .abovePlayer
+                Color.clear.frame(height: 76 + (isAbovePlayer ? 78 : 0))
+            }
+
+            // Integrated Right-Side Lyrics Panel: full-width overlay on compact windows (< 760pt),
+            // or elegant right-hand side panel with seamless gradient on wider displays.
+            // Extends full height through the bottom of the window behind the player bar (zero gap).
+            if coordinator.isLyricsPresented && coordinator.lyricsPosition == .right {
+                GeometryReader { geo in
+                    HStack(spacing: 0) {
+                        Spacer()
                         let panelWidth: CGFloat = if geo.size.width < 760 {
                             geo.size.width
                         } else {
@@ -320,13 +329,18 @@ public struct MainSplitView: View {
                             .transition(.move(edge: .trailing).combined(with: .opacity))
                     }
                 }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .safeAreaInset(edge: .bottom) {
-                Color.clear.frame(height: 76)
+                .ignoresSafeArea()
             }
 
-            PlayerBarView()
+            // Bottom Stack: AbovePlayerLyricsBar (if active) + PlayerBarView
+            VStack(spacing: 0) {
+                if coordinator.isLyricsPresented && coordinator.lyricsPosition == .abovePlayer {
+                    AbovePlayerLyricsBar()
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+
+                PlayerBarView()
+            }
         }
         .ignoresSafeArea(.container, edges: .top)
         .navigationTitle("")

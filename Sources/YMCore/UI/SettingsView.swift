@@ -5,6 +5,7 @@ public struct SettingsView: View {
     @UIState private var audioEngine = AudioPlayerEngine.shared
     @UIState private var authService = AuthService.shared
     @UIState private var themeManager = YMThemeManager.shared
+    @UIState private var coordinator = NavigationCoordinator.shared
     private let networkClient = YMNetworkClient.shared
 
     @UIState private var isMemoryCompressed = false
@@ -86,6 +87,70 @@ public struct SettingsView: View {
                         }
                     }
                     .frame(maxWidth: 440)
+                }
+
+                // Section 0.5: Lyrics & Karaoke Position
+                settingsCard(title: "Текст песен и караоке") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Расположение субтитров во время воспроизведения трека:")
+                            .font(.system(size: 12))
+                            .foregroundStyle(YMTheme.fg60)
+
+                        VStack(spacing: 8) {
+                            ForEach(YMLyricsPosition.allCases) { position in
+                                let isSelected = coordinator.lyricsPosition == position
+                                Button {
+                                    withAnimation(.easeInOut(duration: 0.18)) {
+                                        coordinator.lyricsPosition = position
+                                    }
+                                } label: {
+                                    HStack(spacing: 12) {
+                                        Image(systemName: position == .right ? "sidebar.right" : "dock.rectangle")
+                                            .font(.system(size: 15, weight: .semibold))
+                                            .foregroundStyle(isSelected ? YMTheme.accent : YMTheme.fg60)
+                                            .frame(width: 24, height: 24)
+
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(position.title)
+                                                .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
+                                                .foregroundStyle(YMTheme.fg)
+
+                                            Text(position.subtitle)
+                                                .font(.system(size: 11))
+                                                .foregroundStyle(YMTheme.fg40)
+                                        }
+
+                                        Spacer()
+
+                                        ZStack {
+                                            Circle()
+                                                .strokeBorder(isSelected ? YMTheme.accent : YMTheme.border, lineWidth: 1.5)
+                                                .frame(width: 18, height: 18)
+
+                                            if isSelected {
+                                                Circle()
+                                                    .fill(YMTheme.accent)
+                                                    .frame(width: 10, height: 10)
+                                            }
+                                        }
+                                    }
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 10)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                            .fill(isSelected ? YMTheme.surfaceComponentHover : Color.clear)
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                                    .strokeBorder(isSelected ? YMTheme.borderHover : Color.clear, lineWidth: 1)
+                                            )
+                                    )
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .frame(maxWidth: 440)
+                    }
                 }
 
                 // Section 1: User Account Card
@@ -309,7 +374,7 @@ private struct YMPopupMenu<T: Hashable>: View {
             .padding(.vertical, 6)
             .background(
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(YMTheme.surface)
+                    .fill(YMTheme.isLight ? Color(red: 228 / 255, green: 226 / 255, blue: 220 / 255) : YMTheme.surface)
                     .overlay(
                         RoundedRectangle(cornerRadius: 6, style: .continuous)
                             .strokeBorder(YMTheme.borderHover, lineWidth: 1)
