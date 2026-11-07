@@ -40,7 +40,7 @@ public struct AlbumDetailView: View {
                 .buttonStyle(.plain)
                 .keyboardShortcut("[", modifiers: .command)
 
-                Text(albumTitle)
+                Text(album?.title ?? albumTitle)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(YMTheme.fg60)
 
@@ -74,80 +74,87 @@ public struct AlbumDetailView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let album = album {
-                // Hero Header
-                HStack(alignment: .bottom, spacing: 24) {
-                    CachedCoverImage(
-                        coverUri: album.coverUri,
-                        size: .large,
-                        displaySize: 160,
-                        cornerRadius: YMTheme.cornerRadiusMedium
-                    )
-                    .frame(width: 160, height: 160)
-                    .shadow(color: .black.opacity(0.45), radius: 20, y: 10)
+                ScrollView(.vertical) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        // Hero Header
+                        HStack(alignment: .bottom, spacing: 24) {
+                            CachedCoverImage(
+                                coverUri: album.coverUri,
+                                size: .large,
+                                displaySize: 160,
+                                cornerRadius: YMTheme.cornerRadiusMedium
+                            )
+                            .frame(width: 160, height: 160)
+                            .shadow(color: .black.opacity(0.45), radius: 20, y: 10)
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("АЛЬБОМ")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(YMTheme.fg40)
-                            .tracking(1.2)
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("АЛЬБОМ")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundStyle(YMTheme.fg40)
+                                    .tracking(1.2)
 
-                        Text(album.title)
-                            .font(.system(size: 26, weight: .bold))
-                            .foregroundStyle(YMTheme.fg)
-                            .lineLimit(2)
+                                Text(album.title)
+                                    .font(.system(size: 26, weight: .bold))
+                                    .foregroundStyle(YMTheme.fg)
+                                    .lineLimit(2)
 
-                        // Artists row (clickable)
-                        HStack(spacing: 6) {
-                            ForEach(album.artists) { artist in
-                                Button {
-                                    coordinator.navigate(to: .artist(id: artist.id, name: artist.name))
-                                } label: {
-                                    Text(artist.name)
-                                        .font(.system(size: 14, weight: .semibold))
-                                        .foregroundStyle(YMTheme.accent)
+                                // Artists row (clickable)
+                                HStack(spacing: 6) {
+                                    ForEach(album.artists) { artist in
+                                        Button {
+                                            coordinator.navigate(to: .artist(id: artist.id, name: artist.name))
+                                        } label: {
+                                            Text(artist.name)
+                                                .font(.system(size: 14, weight: .semibold))
+                                                .foregroundStyle(YMTheme.accent)
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
                                 }
-                                .buttonStyle(.plain)
+
+                                Text(album.formattedInfo)
+                                    .font(.caption)
+                                    .foregroundStyle(YMTheme.fg60)
+
+                                // Action Bar
+                                HStack(spacing: 12) {
+                                    Button {
+                                        audioEngine.isWaveMode = false
+                                        audioEngine.assignQueue(album.allTracks, startingAt: 0)
+                                    } label: {
+                                        Label("Слушать альбом", systemImage: "play.fill")
+                                    }
+                                    .buttonStyle(YMGlassPillButtonStyle(primary: true, height: 34))
+                                }
+                                .padding(.top, 4)
                             }
+
+                            Spacer()
                         }
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 16)
 
-                        Text(album.formattedInfo)
-                            .font(.caption)
-                            .foregroundStyle(YMTheme.fg60)
+                        Divider()
+                            .padding(.horizontal, 24)
+                            .padding(.bottom, 8)
 
-                        // Action Bar
-                        HStack(spacing: 12) {
-                            Button {
+                        // Tracklist Table
+                        TrackTableView(
+                            tracks: album.allTracks,
+                            onPlayTrack: { selectedTrack in
                                 audioEngine.isWaveMode = false
-                                audioEngine.assignQueue(album.allTracks, startingAt: 0)
-                            } label: {
-                                Label("Слушать альбом", systemImage: "play.fill")
+                                if let index = album.allTracks.firstIndex(where: { $0.id == selectedTrack.id }) {
+                                    audioEngine.assignQueue(album.allTracks, startingAt: index)
+                                } else {
+                                    audioEngine.assignQueue([selectedTrack], startingAt: 0)
+                                }
                             }
-                            .buttonStyle(YMGlassPillButtonStyle(primary: true, height: 34))
-                        }
-                        .padding(.top, 4)
+                        )
+                        .padding(.horizontal, 16)
                     }
-
-                    Spacer()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.bottom, 90)
                 }
-                .padding(.horizontal, 24)
-                .padding(.vertical, 16)
-
-                Divider()
-                    .padding(.horizontal, 24)
-
-                // Tracklist Table
-                TrackTableView(
-                    tracks: album.allTracks,
-                    onPlayTrack: { selectedTrack in
-                        audioEngine.isWaveMode = false
-                        if let index = album.allTracks.firstIndex(where: { $0.id == selectedTrack.id }) {
-                            audioEngine.assignQueue(album.allTracks, startingAt: index)
-                        } else {
-                            audioEngine.assignQueue([selectedTrack], startingAt: 0)
-                        }
-                    }
-                )
-                .padding(.horizontal, 16)
             }
         }
         .ymScreenBackground()

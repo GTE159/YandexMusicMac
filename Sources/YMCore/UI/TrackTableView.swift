@@ -76,7 +76,7 @@ public struct TrackTableView: View {
                 .frame(width: 36, alignment: .center)
 
             Color.clear
-                .frame(width: 40)
+                .frame(width: 40, height: 1)
 
             Text("ТРЕК")
                 .frame(minWidth: windowState.isMiniWidth ? 120 : 180, alignment: .leading)
@@ -89,7 +89,7 @@ public struct TrackTableView: View {
             }
 
             Color.clear
-                .frame(width: 32)
+                .frame(width: 32, height: 1)
 
             Text("ВРЕМЯ")
                 .frame(width: 50, alignment: .trailing)
