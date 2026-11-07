@@ -1212,19 +1212,18 @@ func testAccountStatusActiveSubscription() {
     #expect(expiredHadSubStatus.hasActiveSubscription == false)
     #expect(expiredHadSubStatus.hadAnySubscription == true)
 
-    // 3. Account with future permissions until date
-    let futureUntilStatus = YMAccountStatus(
-        permissions: YMPermissionsInfo(until: "2099-01-01T00:00:00Z"),
+    // 3. Account with permissions until in future, but plus: false
+    let futureUntilNoPlusStatus = YMAccountStatus(
+        permissions: YMPermissionsInfo(until: "2099-01-01T00:00:00Z", values: ["landing-play", "radio-play"]),
         plus: YMPlusInfo(hasPlus: false)
     )
-    #expect(futureUntilStatus.hasActiveSubscription == true)
+    #expect(futureUntilNoPlusStatus.hasActiveSubscription == false)
 
-    // 4. Account with expired permissions until date
-    let expiredUntilStatus = YMAccountStatus(
-        permissions: YMPermissionsInfo(until: "2020-01-01T00:00:00Z"),
-        plus: YMPlusInfo(hasPlus: false)
+    // 4. Account with nil plus, but play-full-tracks in permissions
+    let fullTracksPermissionsStatus = YMAccountStatus(
+        permissions: YMPermissionsInfo(until: "2099-01-01T00:00:00Z", values: ["play-full-tracks"])
     )
-    #expect(expiredUntilStatus.hasActiveSubscription == false)
+    #expect(fullTracksPermissionsStatus.hasActiveSubscription == true)
 
     // 5. Completely empty/free account
     let freeStatus = YMAccountStatus()

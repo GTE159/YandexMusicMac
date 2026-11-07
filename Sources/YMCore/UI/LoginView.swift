@@ -195,7 +195,7 @@ private struct OAuthSheetView: View {
 
             Divider()
 
-            if let url = URL(string: AuthService.oauthURLString) {
+            if let url = URL(string: "\(AuthService.oauthURLString)&force_confirm=yes") {
                 OAuthInterceptionWebView(url: url, isLoading: $isLoading, onTokenExtracted: onTokenReceived)
                     .frame(minWidth: 480, minHeight: 560)
             }
@@ -222,7 +222,7 @@ private struct OAuthInterceptionWebView: NSViewRepresentable {
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
         context.coordinator.startObserving(webView: webView)
-        webView.load(URLRequest(url: url))
+        webView.load(URLRequest(url: url, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData))
         return webView
     }
 

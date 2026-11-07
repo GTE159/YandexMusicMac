@@ -27,16 +27,16 @@ public struct YMAccountStatus: Codable, Sendable {
     }
 
     public var hasActiveSubscription: Bool {
-        // 1. Direct Yandex Plus flag from API
+        // 1. Authoritative Yandex Plus flag from API
         if let hasPlus = plus?.hasPlus {
-            if hasPlus { return true }
+            return hasPlus
         }
 
-        // 2. Check permissions expiration date if present
-        if let untilStr = permissions?.until,
-           let untilDate = Self.parseDate(untilStr),
-           untilDate > Date() {
-            return true
+        // 2. Explicit full track playback permission (for accounts without explicit plus model)
+        if let values = permissions?.values {
+            if values.contains("play-full-tracks") || values.contains("play-premium-tracks") {
+                return true
+            }
         }
 
         return false

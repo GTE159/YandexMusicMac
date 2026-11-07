@@ -86,9 +86,9 @@ public final class AuthService {
 
     // MARK: - Browser OAuth Navigation
 
-    /// Opens the strict OAuth link in the user's default browser (Safari/Chrome)
+    /// Opens the strict OAuth link in the user's default browser (Safari/Chrome) with explicit account confirmation
     public func openOAuthInBrowser() {
-        guard let url = URL(string: Self.oauthURLString) else { return }
+        guard let url = URL(string: "\(Self.oauthURLString)&force_confirm=yes") else { return }
         NSWorkspace.shared.open(url)
     }
 
