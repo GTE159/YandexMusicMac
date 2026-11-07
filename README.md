@@ -13,7 +13,7 @@
 ## Ключевые особенности
 
 * **Нативность:** Потребление до 150мб за счёт аппаратного даунсемплинга обложек через `ImageIO`, лимитированному кэшированию `NSCache` и разделению поисковых буферов.
-* **Поддержка Apple Silicon и Intel:** Сборка в виде Universal 2 binary — приложение работает нативно как на чипах Apple, так и на Intel.
+* **Поддержка Apple Silicon и Intel:** Сборка в виде Universal 2 binary — приложение работает нативно как на чипах Apple, так и Intel.
 * **Zero-WebKit Auth:** Авторизация через системное окно OAuth с мгновенным перехватом токена и гарантированной выгрузкой WebKit-процессов сразу после входа.
 * **Двойной аудиопротокол и криптография:** Параллельное разрешение потоков (`/get-file-info` с HMAC-SHA256 подписью через `CryptoKit` и каталог `/download-info` с MD5-подписью) с поддержкой Hi-Res FLAC Lossless и 320 kbps MP3/AAC.
 * **«Моя волна» v2 + v1:** Бесконечный персональный поток на современном протоколе Rotor Session v2 с бесшовным fallback на v1 и полной телеметрией (`radioStarted` -> `trackStarted` -> `trackFinished` / `skip` / `like` / `dislike`).
@@ -28,7 +28,7 @@
 Скачайте архив последней версии со страницы [Releases](https://github.com/GTE159/YandexMusicMac/releases):
 
 * **`YandexMusicMac-v1.0.0-universal.zip`** — Универсальная версия (работает нативно и на Apple Silicon, и на Intel).
-* **`YandexMusicMac-v1.0.0-arm64.zip`** —  Cпециально под Apple Silicon (M1/M2/M3/M4).
+* **`YandexMusicMac-v1.0.0-arm64.zip`** —  Cпециально под Apple Silicon.
 * **`YandexMusicMac-v1.0.0-x86_64.zip`** — Для Mac на процессорах Intel.
 
 Распаковать и переместить архив `YandexMusicMac.app` в папку `/Applications` («Программы»).
