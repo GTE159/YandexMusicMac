@@ -14,6 +14,9 @@ public struct FavoritesListView: View {
 
     @UIState private var cachedDisplayedTracks: [YMTrack] = []
     @UIState private var cachedTotalDuration: String = ""
+    @UIState private var isMultiSelectMode: Bool = false
+    @UIState private var selectedTrackIds: Set<String> = []
+    @UIState private var isApplyingSelectionAction: Bool = false
 
     public init() {}
 
@@ -149,20 +152,43 @@ public struct FavoritesListView: View {
                                 playAllButton(title: "Слушать всё", height: 32)
                                 shuffleButton(title: "Перемешать", height: 32)
                                 waveButton(title: "Волна по любимому", height: 32)
+                                FavoritesDownloadButton(
+                                    filterQuery: filterQuery,
+                                    displayedTracks: displayedTracks,
+                                    height: 32,
+                                    compact: false
+                                )
+                                selectModeToggleButton(title: isMultiSelectMode ? "Готово" : "Выбрать", height: 32)
                             }
 
                             HStack(spacing: 8) {
                                 playAllButton(title: "Слушать", height: 30)
                                 shuffleButton(title: "Микс", height: 30)
                                 waveButton(title: "Волна", height: 30)
+                                FavoritesDownloadButton(
+                                    filterQuery: filterQuery,
+                                    displayedTracks: displayedTracks,
+                                    height: 30,
+                                    compact: true
+                                )
+                                selectModeToggleButton(title: isMultiSelectMode ? "Готово" : "Выбрать", height: 30)
                             }
 
                             VStack(alignment: .leading, spacing: 8) {
                                 HStack(spacing: 8) {
                                     playAllButton(title: "Слушать", height: 30)
                                     shuffleButton(title: "Микс", height: 30)
+                                    FavoritesDownloadButton(
+                                        filterQuery: filterQuery,
+                                        displayedTracks: displayedTracks,
+                                        height: 30,
+                                        compact: true
+                                    )
                                 }
-                                waveButton(title: "Волна по любимому", height: 30)
+                                HStack(spacing: 8) {
+                                    waveButton(title: "Волна по любимому", height: 30)
+                                    selectModeToggleButton(title: isMultiSelectMode ? "Готово" : "Выбрать", height: 30)
+                                }
                             }
                         }
                         .padding(.top, 2)
@@ -256,6 +282,11 @@ public struct FavoritesListView: View {
                     }
                     .frame(maxWidth: .infinity, minHeight: 200)
                 } else {
+                    if isMultiSelectMode || selectedTrackIds.count > 1 {
+                        selectionActionBar
+                            .padding(.horizontal, 24)
+                    }
+
                     TrackTableView(
                         tracks: displayedTracks,
                         onPlayTrack: { track in
@@ -292,7 +323,9 @@ public struct FavoritesListView: View {
                             Task {
                                 await likesService.loadMoreLikedTracks()
                             }
-                        }
+                        },
+                        isSelectionMode: isMultiSelectMode,
+                        externalSelectedIds: $selectedTrackIds
                     )
                     .padding(.horizontal, 14)
 
@@ -432,5 +465,237 @@ public struct FavoritesListView: View {
         }
         .buttonStyle(YMGlassPillButtonStyle(primary: false, height: height))
         .disabled(displayedTracks.isEmpty)
+    }
+
+    @ViewBuilder
+    private func selectModeToggleButton(title: String, height: CGFloat) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.16)) {
+                isMultiSelectMode.toggle()
+                if !isMultiSelectMode {
+                    selectedTrackIds.removeAll()
+                }
+            }
+        } label: {
+            Label(title, systemImage: isMultiSelectMode ? "checkmark.circle.fill" : "checklist")
+                .fixedSize(horizontal: true, vertical: false)
+        }
+        .buttonStyle(YMGlassPillButtonStyle(primary: false, height: height))
+        .disabled(displayedTracks.isEmpty)
+        .help(isMultiSelectMode ? "Завершить выбор треков" : "Выбрать несколько треков для добавления в волну или скачивания")
+    }
+
+    private var selectedTracksInOrder: [YMTrack] {
+        guard !selectedTrackIds.isEmpty else { return [] }
+        return displayedTracks.filter { !$0.isSpacer && selectedTrackIds.contains($0.id) }
+    }
+
+    @ViewBuilder
+    private var selectionActionBar: some View {
+        let count = selectedTracksInOrder.count
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                selectionSummaryText(count: count)
+                Spacer(minLength: 8)
+                selectionActionButtons(count: count)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                selectionSummaryText(count: count)
+                HStack(spacing: 8) {
+                    selectionActionButtons(count: count)
+                }
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(YMTheme.surface)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(YMTheme.accent.opacity(0.32), lineWidth: 1)
+                )
+        )
+    }
+
+    @ViewBuilder
+    private func selectionSummaryText(count: Int) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(YMTheme.accent)
+            Text(count > 0 ? "Выбрано: \(formatTrackCount(count))" : "Выберите треки галочками или ⌘/⇧ + кликом")
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(YMTheme.fg)
+        }
+    }
+
+    @ViewBuilder
+    private func selectionActionButtons(count: Int) -> some View {
+        let targets = selectedTracksInOrder
+        Button {
+            guard !targets.isEmpty, !isApplyingSelectionAction else { return }
+            isApplyingSelectionAction = true
+            Task {
+                defer { isApplyingSelectionAction = false }
+                if audioEngine.isWaveMode {
+                    await WaveSessionController.shared.addTracksToActiveWave(targets)
+                } else {
+                    await WaveSessionController.shared.startWaveWithTracksAsLiked(targets)
+                }
+                selectedTrackIds.removeAll()
+                isMultiSelectMode = false
+            }
+        } label: {
+            Label(
+                audioEngine.isWaveMode ? "Добавить в текущую волну" : "Волна по выбранным",
+                systemImage: "waveform.path.ecg"
+            )
+            .fixedSize(horizontal: true, vertical: false)
+        }
+        .buttonStyle(YMGlassPillButtonStyle(primary: true, height: 28))
+        .disabled(count == 0 || isApplyingSelectionAction)
+
+        Button {
+            guard !targets.isEmpty, !isApplyingSelectionAction else { return }
+            isApplyingSelectionAction = true
+            Task {
+                defer { isApplyingSelectionAction = false }
+                let resolved = await likesService.resolveTracks(targets)
+                if !resolved.isEmpty {
+                    OfflineDownloadManager.shared.enqueueDownloads(tracks: resolved)
+                }
+                selectedTrackIds.removeAll()
+                isMultiSelectMode = false
+            }
+        } label: {
+            Label("Скачать", systemImage: "arrow.down.circle")
+                .fixedSize(horizontal: true, vertical: false)
+        }
+        .buttonStyle(YMGlassPillButtonStyle(primary: false, height: 28))
+        .disabled(count == 0 || isApplyingSelectionAction)
+
+        if !filterQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            Button("Выбрать все") {
+                selectedTrackIds = Set(displayedTracks.filter { !$0.isPlaceholder && !$0.isSpacer }.map(\.id))
+            }
+            .buttonStyle(YMGlassPillButtonStyle(primary: false, height: 28))
+        }
+
+        if count > 0 {
+            Button("Снять выбор") {
+                selectedTrackIds.removeAll()
+            }
+            .buttonStyle(YMGlassPillButtonStyle(primary: false, height: 28))
+        }
+    }
+}
+
+// MARK: - Isolated Favorites Download Button
+
+/// Isolates `OfflineDownloadManager` observation from `FavoritesListView` and hydrates lazy likes
+/// before enqueuing downloads when the unfiltered Favorites library still contains placeholders.
+private struct FavoritesDownloadButton: View {
+    let filterQuery: String
+    let displayedTracks: [YMTrack]
+    let height: CGFloat
+    let compact: Bool
+
+    @UIState private var likesService = LikesService.shared
+    @UIState private var offlineManager = OfflineDownloadManager.shared
+    @UIState private var isPreparingBatch = false
+
+    private var isFiltered: Bool {
+        !filterQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var targetCleanIds: [String] {
+        if isFiltered {
+            return displayedTracks.compactMap { track -> String? in
+                guard !track.isPlaceholder && !track.isSpacer else { return nil }
+                return OfflineTrackID.clean(track.id)
+            }
+        }
+        if !likesService.likedTrackIds.isEmpty {
+            return Array(likesService.likedTrackIds)
+        }
+        return displayedTracks.compactMap { track -> String? in
+            guard !track.isSpacer else { return nil }
+            return OfflineTrackID.clean(track.id)
+        }
+    }
+
+    var body: some View {
+        let ids = targetCleanIds
+        let totalCount = ids.count
+        let downloadedSet = offlineManager.downloadedTrackIds
+        let downloadedCount = ids.reduce(0) { count, cleanId in
+            count + (downloadedSet.contains(cleanId) ? 1 : 0)
+        }
+        let allDownloaded = totalCount > 0 && downloadedCount == totalCount
+
+        // Fast O(1) guard avoids scanning all liked track IDs when no downloads are active
+        let hasAnyEngineActivity = offlineManager.activeDownloadsCount > 0 || offlineManager.pendingDownloadsCount > 0
+        let activeIds: [String] = hasAnyEngineActivity
+            ? ids.filter { offlineManager.state(for: $0).phase.isActive }
+            : []
+        let isDownloadingAny = !activeIds.isEmpty
+
+        Button {
+            if isPreparingBatch || allDownloaded {
+                return
+            } else if isDownloadingAny {
+                for id in activeIds {
+                    offlineManager.cancelDownload(trackId: id)
+                }
+            } else if isFiltered {
+                let playable = displayedTracks.filter { !$0.isPlaceholder && !$0.isSpacer && $0.available != false }
+                offlineManager.enqueueDownloads(tracks: playable)
+            } else {
+                isPreparingBatch = true
+                Task {
+                    defer { isPreparingBatch = false }
+                    let allPlayable = await likesService.resolveAllLikedTracksForBatchAction()
+                    if !allPlayable.isEmpty {
+                        offlineManager.enqueueDownloads(tracks: allPlayable)
+                    }
+                }
+            }
+        } label: {
+            if isPreparingBatch {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .scaleEffect(0.78)
+                    Text(compact ? "..." : "Подготовка...")
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+            } else if allDownloaded {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .foregroundStyle(YMTheme.accent)
+                    Text(compact ? "Оффлайн" : "Скачано")
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+            } else if isDownloadingAny {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .scaleEffect(0.78)
+                    Text(compact ? "\(downloadedCount)/\(totalCount)" : "Скачивание (\(downloadedCount)/\(totalCount))")
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+            } else {
+                Label("Скачать", systemImage: "arrow.down.circle")
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+        }
+        .buttonStyle(YMGlassPillButtonStyle(primary: false, height: height))
+        .disabled(totalCount == 0 || allDownloaded || isPreparingBatch)
+        .help(
+            allDownloaded
+                ? "Все выбранные треки скачаны для оффлайн-прослушивания"
+                : (isDownloadingAny ? "Нажмите для отмены скачивания" : "Скачать треки из Избранного для прослушивания без интернета")
+        )
     }
 }

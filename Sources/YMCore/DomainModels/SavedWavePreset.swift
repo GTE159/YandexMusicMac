@@ -159,5 +159,6 @@ public enum YMWaveTrackOutcome: Sendable {
     case skipped(playedSeconds: Double)
     case liked
     case moreLikeThis
+    case addedToWaveAsLiked
     case lessLikeThis
 }

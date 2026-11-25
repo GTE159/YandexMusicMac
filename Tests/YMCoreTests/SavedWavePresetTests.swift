@@ -332,4 +332,72 @@ struct SavedWavePresetTests {
         #expect(ctx2.seeds.contains("track:503"))
         #expect(ctx2.seeds.contains("genre:electronic"))
     }
+
+    @Test("addedToWaveAsLiked promotes injected tracks to top anchors, clears prior exclusion, and triggers saved drift")
+    @MainActor
+    func testAddedToWaveAsLikedOutcomeAndQueueInjection() {
+        let baseAnchor = SavedWaveAnchorTrack(id: "701", albumId: "900", title: "Base", artistId: "a1", artistName: "Base Artist")
+        let preset = SavedWavePreset(
+            ownerUid: "u1",
+            name: "Фокус",
+            baseContextSeeds: ["genre:ambient"],
+            baseContextTitle: "Амбиент",
+            baseFallbackStationId: "genre:ambient",
+            vibe: .focus,
+            anchorTracks: [baseAnchor],
+            excludedTrackIds: ["702"]
+        )
+        let ctx = YMWaveContext.forSavedWave(preset)
+        let tracker = WaveSessionTasteTracker()
+        tracker.beginSessionFromPreset(preset, context: ctx)
+
+        let injected = makeTrack(id: "702:111", title: "Chosen Fav", artistId: "a2", artistName: "Fav Artist")
+        tracker.recordOutcome(.addedToWaveAsLiked, for: injected)
+
+        #expect(tracker.hasPendingStyleDrift == true)
+        #expect(!tracker.currentExcludedTrackIds.contains("702"))
+        #expect(preset.excludedTrackIds == ["702"]) // Saved preset stays untouched on disk
+
+        let candidate = tracker.buildCandidateSnapshot(
+            currentTrack: nil,
+            queue: [],
+            currentIndex: 0,
+            context: ctx,
+            vibe: .focus
+        )
+        #expect(candidate.anchorTracks.first?.id == "702")
+
+        // Verify AudioPlayerEngine active wave queue injection edge-cases (serial pinning, stale tail trim, dedup)
+        let engine = AudioPlayerEngine()
+        defer { engine.stopAndClear() }
+
+        let cur = makeTrack(id: "800", title: "Current", artistId: "a0", artistName: "Artist 0")
+        let staleRotor1 = makeTrack(id: "801", title: "Stale 1", artistId: "a1", artistName: "Artist 1")
+        let staleRotor2 = makeTrack(id: "802", title: "Stale 2", artistId: "a2", artistName: "Artist 2")
+        let fav1 = makeTrack(id: "901:10", title: "Fav 1", artistId: "a3", artistName: "Artist 3")
+        let fav2 = makeTrack(id: "902:20", title: "Fav 2", artistId: "a4", artistName: "Artist 4")
+        let dupFav1 = makeTrack(id: "901", title: "Fav 1 Dup", artistId: "a3", artistName: "Artist 3")
+
+        // Outside wave mode -> no injection
+        engine.isWaveMode = false
+        engine.assignQueue([cur, staleRotor1], startingAt: 0)
+        #expect(engine.injectTracksIntoActiveWave([fav1]).isEmpty)
+
+        // Active wave mode -> injects fav1, drops staleRotor1/2, deduplicates current track while accepting its feedback
+        engine.isWaveMode = true
+        engine.assignQueue([cur, staleRotor1, staleRotor2], startingAt: 0)
+        let res1 = engine.injectTracksIntoActiveWave([cur, fav1, dupFav1])
+        #expect(res1.map(\.id) == ["800", "901:10"])
+        #expect(engine.queue.map(\.id) == ["800", "901:10"])
+        #expect(engine.currentIndex == 0)
+
+        // Append simulated refreshed Rotor recommendation then inject a second track: fav1 must remain pinned!
+        let newRotor = makeTrack(id: "803", title: "Refreshed Rotor", artistId: "a5", artistName: "Artist 5")
+        engine.appendToQueue([newRotor])
+        #expect(engine.queue.map(\.id) == ["800", "901:10", "803"])
+
+        let res2 = engine.injectTracksIntoActiveWave([fav2])
+        #expect(res2.map(\.id) == ["902:20"])
+        #expect(engine.queue.map(\.id) == ["800", "901:10", "902:20"])
+    }
 }

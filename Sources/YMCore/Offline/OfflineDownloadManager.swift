@@ -326,10 +326,10 @@ public final class OfflineDownloadManager {
 
     private func pumpQueue() {
         while activeTasks.count < maxConcurrentDownloads, !pendingQueue.isEmpty {
-            let limitGB = AudioQualitySettings.shared.offlineCacheLimitGB
-            if limitGB > 0 {
-                let limitBytes = Int64(limitGB) * 1_073_741_824
+            let limitBytes = AudioQualitySettings.shared.effectiveOfflineCacheLimitBytes
+            if limitBytes > 0 {
                 if totalUsedBytes >= limitBytes {
+                    let limitLabel = AudioQualitySettings.shared.effectiveOfflineCacheLimitDisplay
                     for leftover in pendingQueue {
                         let id = OfflineTrackID.clean(leftover.id)
                         if activeTasks[id] == nil {
@@ -338,8 +338,8 @@ public final class OfflineDownloadManager {
                     }
                     pendingQueue.removeAll()
                     pendingDownloadsCount = 0
-                    lastErrorMessage = "Достигнут лимит оффлайн-кэша (\(limitGB) ГБ). Увеличьте лимит в Настройках или удалите часть треков."
-                    PlaylistsService.shared.showToast("Достигнут лимит оффлайн-кэша (\(limitGB) ГБ)")
+                    lastErrorMessage = "Достигнут лимит оффлайн-кэша (\(limitLabel)). Увеличьте лимит в Настройках или удалите часть треков."
+                    PlaylistsService.shared.showToast("Достигнут лимит оффлайн-кэша (\(limitLabel))")
                     return
                 }
             }

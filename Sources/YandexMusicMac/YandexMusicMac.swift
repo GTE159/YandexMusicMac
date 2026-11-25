@@ -3,8 +3,12 @@ import AppKit
 import YMCore
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTouchBarProvider {
     weak var mainWindow: NSWindow?
+
+    var touchBar: NSTouchBar? {
+        YMTouchBarController.shared.touchBar
+    }
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         NSWindow.allowsAutomaticWindowTabbing = false
@@ -15,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // Гарантируем, что приложение работает как полноценное GUI-приложение с иконкой в Dock
         NSApp.setActivationPolicy(.regular)
         applyAppIconIfNeeded()
+        YMTouchBarController.shared.install()
         NSApp.activate(ignoringOtherApps: true)
         configureMainWindowIfNeeded()
         localizeSystemMenusToRussian()
@@ -44,6 +49,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func applicationDidBecomeActive(_ notification: Notification) {
         configureMainWindowIfNeeded()
         localizeSystemMenusToRussian()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        AudioPlayerEngine.shared.cleanup()
     }
 
     private var isClosingFromFullScreen = false
@@ -98,6 +107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             window.minSize = NSSize(width: 440, height: 320)
             window.toolbar = nil
             window.isMovableByWindowBackground = false
+            YMTouchBarController.shared.attachToWindow(window)
             for buttonType: NSWindow.ButtonType in [.closeButton, .miniaturizeButton, .zoomButton] {
                 window.standardWindowButton(buttonType)?.isHidden = false
             }
@@ -160,6 +170,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             "Emoji & Symbols": "Эмодзи и символы",
             "Show Sidebar": "Показать боковое меню",
             "Hide Sidebar": "Скрыть боковое меню",
+            "Customize Touch Bar…": "Настроить Touch Bar…",
+            "Customize Touch Bar...": "Настроить Touch Bar…",
             "Enter Full Screen": "Перейти в полноэкранный режим",
             "Exit Full Screen": "Выйти из полноэкранного режима",
             "Minimize": "Свернуть",

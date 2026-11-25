@@ -11,11 +11,14 @@ public struct TrackTableView: View {
     public var onRemoveFromPlaylist: ((YMTrack, Int) -> Void)? = nil
     public var showHeader: Bool = true
     public var showAlbum: Bool = true
+    public var isSelectionMode: Bool = false
+    public var externalSelectedIds: Binding<Set<String>>? = nil
 
     @UIState private var audioEngine = AudioPlayerEngine.shared
     @UIState private var coordinator = NavigationCoordinator.shared
     @UIState private var windowState = WindowState.shared
-    @UIState private var selectedTrackId: String? = nil
+    @UIState private var internalSelectedIds: Set<String> = []
+    @UIState private var selectionAnchorId: String? = nil
     @UIState private var lastClickedTrackId: String? = nil
     @UIState private var lastClickTimestamp: TimeInterval = 0
 
@@ -26,7 +29,9 @@ public struct TrackTableView: View {
         onLoadMore: (() -> Void)? = nil,
         onRemoveFromPlaylist: ((YMTrack, Int) -> Void)? = nil,
         showHeader: Bool = true,
-        showAlbum: Bool = true
+        showAlbum: Bool = true,
+        isSelectionMode: Bool = false,
+        externalSelectedIds: Binding<Set<String>>? = nil
     ) {
         self.tracks = tracks
         self.onPlayTrack = onPlayTrack
@@ -35,6 +40,20 @@ public struct TrackTableView: View {
         self.onRemoveFromPlaylist = onRemoveFromPlaylist
         self.showHeader = showHeader
         self.showAlbum = showAlbum
+        self.isSelectionMode = isSelectionMode
+        self.externalSelectedIds = externalSelectedIds
+    }
+
+    private var activeSelectedIds: Set<String> {
+        externalSelectedIds?.wrappedValue ?? internalSelectedIds
+    }
+
+    private func setActiveSelectedIds(_ ids: Set<String>) {
+        if let external = externalSelectedIds {
+            external.wrappedValue = ids
+        } else {
+            internalSelectedIds = ids
+        }
     }
 
     public var body: some View {
@@ -89,23 +108,26 @@ public struct TrackTableView: View {
                     } else {
                         let isCurrent = currentTrackId == track.id
                         let rowHoverId = "\(index)_\(track.id)"
+                        let isSelected = activeSelectedIds.contains(track.id)
                         ModernTrackRow(
                             track: track,
                             index: index,
                             rowHoverId: rowHoverId,
                             isCurrentTrack: isCurrent,
                             isPlaying: isCurrent && isEnginePlaying,
-                            isSelected: selectedTrackId == track.id,
+                            isSelected: isSelected,
+                            isSelectionMode: isSelectionMode,
                             showAlbum: showAlbum,
                             isCompactWidth: isCompactWidth,
                             isMiniWidth: isMiniWidth,
                             themeKey: YMTheme.themeRevisionKey,
                             onPlay: {
-                                selectedTrackId = track.id
+                                setActiveSelectedIds([track.id])
+                                selectionAnchorId = track.id
                                 onPlayTrack(track)
                             },
                             onTapRow: {
-                                handleRowTap(track: track)
+                                handleRowTap(track: track, index: index)
                             },
                             onArtistSelect: { artist in
                                 coordinator.navigate(to: .artist(id: artist.id, name: artist.name))
@@ -118,6 +140,9 @@ public struct TrackTableView: View {
                             },
                             onRemoveFromPlaylist: onRemoveFromPlaylist.map { handler in
                                 { handler(track, index) }
+                            },
+                            contextTracksProvider: {
+                                resolveContextTracks(for: track)
                             }
                         )
                         .equatable()
@@ -133,19 +158,66 @@ public struct TrackTableView: View {
         }
     }
 
-    private func handleRowTap(track: YMTrack) {
+    private func handleRowTap(track: YMTrack, index: Int) {
         let now = ProcessInfo.processInfo.systemUptime
+        let modifiers = NSApp?.currentEvent?.modifierFlags ?? []
+        let isCommandPressed = modifiers.contains(.command)
+        let isShiftPressed = modifiers.contains(.shift)
+
+        if isShiftPressed {
+            let anchorIdx = selectionAnchorId.flatMap { anchorId in
+                tracks.firstIndex(where: { $0.id == anchorId })
+            } ?? index
+            let low = min(anchorIdx, index)
+            let high = max(anchorIdx, index)
+            var updated = activeSelectedIds
+            for i in low...high {
+                let candidate = tracks[i]
+                if !candidate.isSpacer {
+                    updated.insert(candidate.id)
+                }
+            }
+            setActiveSelectedIds(updated)
+            lastClickedTrackId = track.id
+            lastClickTimestamp = now
+            return
+        }
+
+        if isCommandPressed || isSelectionMode {
+            var updated = activeSelectedIds
+            if updated.contains(track.id) {
+                updated.remove(track.id)
+            } else {
+                updated.insert(track.id)
+            }
+            setActiveSelectedIds(updated)
+            selectionAnchorId = track.id
+            lastClickedTrackId = track.id
+            lastClickTimestamp = now
+            return
+        }
+
         let clickCount = NSApp?.currentEvent?.clickCount ?? 1
         let isDouble = clickCount >= 2
-            || (selectedTrackId == track.id
+            || (activeSelectedIds == [track.id]
                 && lastClickedTrackId == track.id
                 && (now - lastClickTimestamp) <= NSEvent.doubleClickInterval)
-        selectedTrackId = track.id
+        setActiveSelectedIds([track.id])
+        selectionAnchorId = track.id
         lastClickedTrackId = track.id
         lastClickTimestamp = now
         if isDouble {
             onPlayTrack(track)
         }
+    }
+
+    private func resolveContextTracks(for rightClickedTrack: YMTrack) -> [YMTrack] {
+        let selected = activeSelectedIds
+        guard selected.contains(rightClickedTrack.id), selected.count > 1 else {
+            return [rightClickedTrack]
+        }
+        let ordered = tracks.filter { !$0.isSpacer && selected.contains($0.id) }
+        return ordered.isEmpty ? [rightClickedTrack] : ordered
     }
 
     @ViewBuilder
@@ -277,6 +349,7 @@ private struct ModernTrackRow: View {
     let isCurrentTrack: Bool
     let isPlaying: Bool
     let isSelected: Bool
+    let isSelectionMode: Bool
     let showAlbum: Bool
     let isCompactWidth: Bool
     let isMiniWidth: Bool
@@ -287,6 +360,7 @@ private struct ModernTrackRow: View {
     let onAlbumSelect: (YMAlbum) -> Void
     let onShowLyrics: () -> Void
     let onRemoveFromPlaylist: (() -> Void)?
+    let contextTracksProvider: () -> [YMTrack]
 
     private let hoverManager = TrackHoverManager.shared
 
@@ -300,13 +374,21 @@ private struct ModernTrackRow: View {
 
     var body: some View {
         HStack(spacing: isMiniWidth ? 8 : 12) {
-            // Track Number (clean & simple, playback button is on the cover only)
-            Text("\(index + 1)")
-                .font(.system(size: 12, weight: isCurrentTrack ? .bold : .medium).monospacedDigit())
-                .foregroundStyle(isCurrentTrack ? YMTheme.accent : YMTheme.fg40)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                .frame(width: isMiniWidth ? 30 : 38, alignment: .center)
+            // Track Number or Multi-Select Checkbox (fixed width to prevent layout jitter)
+            Group {
+                if isSelectionMode {
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(isSelected ? YMTheme.accent : YMTheme.fg40)
+                } else {
+                    Text("\(index + 1)")
+                        .font(.system(size: 12, weight: isCurrentTrack ? .bold : .medium).monospacedDigit())
+                        .foregroundStyle(isCurrentTrack ? YMTheme.accent : YMTheme.fg40)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
+            }
+            .frame(width: isMiniWidth ? 30 : 38, alignment: .center)
 
             // Cover thumbnail with isolated hover/play overlay
             TrackRowCoverView(
@@ -409,41 +491,100 @@ private struct ModernTrackRow: View {
             onTapRow()
         }
         .contextMenu {
-            Button("Воспроизвести сейчас") {
-                onPlay()
+            let selectedTracks = contextTracksProvider()
+            if selectedTracks.count > 1 {
+                TrackContextMultiSelectWaveMenu(selectedTracks: selectedTracks)
+                Button("Добавить выбранные (\(selectedTracks.count)) в конец очереди") {
+                    Task {
+                        let resolved = await LikesService.shared.resolveTracks(selectedTracks)
+                        if !resolved.isEmpty {
+                            AudioPlayerEngine.shared.addToQueue(resolved)
+                        }
+                    }
+                }
+                Button("Скачать выбранные (\(selectedTracks.count)) для оффлайна") {
+                    Task {
+                        let resolved = await LikesService.shared.resolveTracks(selectedTracks)
+                        if !resolved.isEmpty {
+                            OfflineDownloadManager.shared.enqueueDownloads(tracks: resolved)
+                        }
+                    }
+                }
+                Divider()
+            } else {
+                Button("Воспроизвести сейчас") {
+                    onPlay()
+                }
+                Button("Воспроизвести следующим") {
+                    AudioPlayerEngine.shared.insertNext(track)
+                }
+                Button("Добавить в конец очереди") {
+                    AudioPlayerEngine.shared.addToQueue([track])
+                }
+                Divider()
+                TrackContextSingleWaveMenu(track: track)
+                ForEach(track.artists) { artist in
+                    Button("Перейти к исполнителю: \(artist.name)") {
+                        onArtistSelect(artist)
+                    }
+                }
+                if let album = track.albums.first {
+                    Button("Перейти к альбому: \(album.title)") {
+                        onAlbumSelect(album)
+                    }
+                }
+                Button("Показать текст песни") {
+                    onShowLyrics()
+                }
+                Divider()
+                AddToPlaylistContextMenu(track: track)
+                if let onRemoveFromPlaylist = onRemoveFromPlaylist {
+                    Button("Удалить из плейлиста", role: .destructive) {
+                        onRemoveFromPlaylist()
+                    }
+                }
+                OfflineDownloadContextMenuItem(track: track)
+                LikeContextMenuItem(track: track)
             }
-            Button("Воспроизвести следующим") {
-                AudioPlayerEngine.shared.insertNext(track)
-            }
-            Button("Добавить в конец очереди") {
-                AudioPlayerEngine.shared.addToQueue([track])
-            }
-            Divider()
-            Button("Запустить Мою волну по треку") {
-                AudioPlayerEngine.shared.startWave(forTrack: track)
-            }
-            ForEach(track.artists) { artist in
-                Button("Перейти к исполнителю: \(artist.name)") {
-                    onArtistSelect(artist)
+        }
+    }
+}
+
+private struct TrackContextSingleWaveMenu: View {
+    let track: YMTrack
+    @UIState private var audioEngine = AudioPlayerEngine.shared
+
+    var body: some View {
+        if audioEngine.isWaveMode {
+            Button("Добавить в текущую волну") {
+                Task {
+                    await WaveSessionController.shared.addTracksToActiveWave([track])
                 }
             }
-            if let album = track.albums.first {
-                Button("Перейти к альбому: \(album.title)") {
-                    onAlbumSelect(album)
+        }
+        Button("Запустить Мою волну по треку") {
+            audioEngine.startWave(forTrack: track)
+        }
+    }
+}
+
+private struct TrackContextMultiSelectWaveMenu: View {
+    let selectedTracks: [YMTrack]
+    @UIState private var audioEngine = AudioPlayerEngine.shared
+
+    var body: some View {
+        if audioEngine.isWaveMode {
+            Button("Добавить выбранные (\(selectedTracks.count)) в текущую волну") {
+                Task {
+                    await WaveSessionController.shared.addTracksToActiveWave(selectedTracks)
                 }
             }
-            Button("Показать текст песни") {
-                onShowLyrics()
-            }
-            Divider()
-            AddToPlaylistContextMenu(track: track)
-            if let onRemoveFromPlaylist = onRemoveFromPlaylist {
-                Button("Удалить из плейлиста", role: .destructive) {
-                    onRemoveFromPlaylist()
+        } else {
+            Button("Запустить Мою волну с выбранными (\(selectedTracks.count))") {
+                Task {
+                    await WaveSessionController.shared.startWaveWithTracksAsLiked(selectedTracks)
                 }
             }
-            OfflineDownloadContextMenuItem(track: track)
-            LikeContextMenuItem(track: track)
         }
     }
 }
@@ -458,6 +599,7 @@ extension ModernTrackRow: @preconcurrency Equatable {
         lhs.isCurrentTrack == rhs.isCurrentTrack &&
         lhs.isPlaying == rhs.isPlaying &&
         lhs.isSelected == rhs.isSelected &&
+        lhs.isSelectionMode == rhs.isSelectionMode &&
         lhs.showAlbum == rhs.showAlbum &&
         lhs.isCompactWidth == rhs.isCompactWidth &&
         lhs.isMiniWidth == rhs.isMiniWidth &&

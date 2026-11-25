@@ -2349,6 +2349,45 @@ func testTrackHoverManagerScrollPhaseSuppression() async {
     hoverManager.cleanup()
 }
 
+@Test("YMTouchBarController configures AppKit touchBar, attaches to NSWindow, and builds layout without volume popover")
+@MainActor
+func testYMTouchBarControllerConfiguration() {
+    let controller = YMTouchBarController.shared
+    controller.install()
+
+    let bar = controller.touchBar
+    #expect(bar.delegate === controller)
+    #expect(bar.customizationIdentifier == NSTouchBar.CustomizationIdentifier("com.yandexmusic.mac.touchbar.main"))
+    #expect(!bar.defaultItemIdentifiers.isEmpty)
+    #expect(!bar.defaultItemIdentifiers.contains(NSTouchBarItem.Identifier("com.yandexmusic.mac.tb.volumePopover")))
+    #expect(bar.defaultItemIdentifiers.contains(NSTouchBarItem.Identifier("com.yandexmusic.mac.tb.lyrics")))
+    #expect(bar.defaultItemIdentifiers.contains(NSTouchBarItem.Identifier("com.yandexmusic.mac.tb.shuffle")))
+    #expect(NSApplication.shared.touchBar === bar)
+
+    let dummyWindow = NSWindow(
+        contentRect: NSRect(x: 0, y: 0, width: 480, height: 320),
+        styleMask: [.titled, .closable],
+        backing: .buffered,
+        defer: false
+    )
+    controller.attachToWindow(dummyWindow)
+    #expect(dummyWindow.touchBar === bar)
+
+    let customIDs = bar.customizationAllowedItemIdentifiers.filter {
+        $0 != .fixedSpaceSmall && $0 != .fixedSpaceLarge && $0 != .flexibleSpace
+    }
+    for identifier in customIDs {
+        let item = controller.touchBar(bar, makeItemForIdentifier: identifier)
+        #expect(item != nil, "Touch Bar item for \(identifier.rawValue) should be instantiated")
+    }
+
+    let removedVolumeItem = controller.touchBar(
+        bar,
+        makeItemForIdentifier: NSTouchBarItem.Identifier("com.yandexmusic.mac.tb.volumePopover")
+    )
+    #expect(removedVolumeItem == nil)
+}
+
 
 
 

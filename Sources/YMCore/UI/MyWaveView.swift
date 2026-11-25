@@ -29,6 +29,8 @@ public final class WaveSessionController {
 
     private var toastDismissTask: Task<Void, Never>? = nil
     private var waveStartTask: Task<Void, Never>? = nil
+    private var loadMoreTask: Task<Void, Never>? = nil
+    private var waveAdjustmentGeneration: UInt64 = 0
     private var lastEmptyMoreTracksAt: Date? = nil
 
     private init() {
@@ -109,6 +111,10 @@ public final class WaveSessionController {
         excludedTrackIds: Set<String>
     ) {
         waveStartTask?.cancel()
+        loadMoreTask?.cancel()
+        loadMoreTask = nil
+        isLoadingMoreWave = false
+        waveAdjustmentGeneration &+= 1
         isLoadingWave = true
         errorMessage = nil
         lastEmptyMoreTracksAt = nil
@@ -164,6 +170,11 @@ public final class WaveSessionController {
     }
 
     public func loadMoreTracks() async {
+        if let existingTask = loadMoreTask {
+            await existingTask.value
+            return
+        }
+
         let currentList = displayedWaveTracks
         guard !isLoadingMoreWave, let lastTrack = currentList.last else { return }
 
@@ -172,30 +183,199 @@ public final class WaveSessionController {
             return
         }
 
+        let adjustmentGen = waveAdjustmentGeneration
         isLoadingMoreWave = true
-        defer { isLoadingMoreWave = false }
 
-        do {
-            let queueIds = currentList.suffix(25).map(\.rotorTrackIdentifier)
-            let nextBatch = try await RotorService.shared.fetchNextBatch(
-                lastTrackId: lastTrack.rotorTrackIdentifier,
-                queueHistory: queueIds
-            )
-            if nextBatch.isEmpty {
-                lastEmptyMoreTracksAt = Date()
-            } else {
-                lastEmptyMoreTracksAt = nil
-                let engine = AudioPlayerEngine.shared
-                if engine.isWaveMode {
-                    engine.appendToQueue(nextBatch)
-                    waveTracks = engine.queue
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer {
+                self.isLoadingMoreWave = false
+                self.loadMoreTask = nil
+            }
+
+            do {
+                let queueIds = currentList.suffix(25).map(\.rotorTrackIdentifier)
+                let nextBatch = try await RotorService.shared.fetchNextBatch(
+                    lastTrackId: lastTrack.rotorTrackIdentifier,
+                    queueHistory: queueIds
+                )
+                guard !Task.isCancelled, self.waveAdjustmentGeneration == adjustmentGen else {
+                    return
+                }
+                if nextBatch.isEmpty {
+                    self.lastEmptyMoreTracksAt = Date()
                 } else {
-                    waveTracks.append(contentsOf: nextBatch)
+                    self.lastEmptyMoreTracksAt = nil
+                    let engine = AudioPlayerEngine.shared
+                    if engine.isWaveMode {
+                        engine.appendToQueue(nextBatch)
+                        self.waveTracks = engine.queue
+                    } else {
+                        self.waveTracks.append(contentsOf: nextBatch)
+                    }
+                }
+            } catch {
+                if !Task.isCancelled {
+                    print("[WaveSessionController] Error loading more wave tracks: \(error)")
                 }
             }
-        } catch {
-            print("[WaveSessionController] Error loading more wave tracks: \(error)")
         }
+
+        self.loadMoreTask = task
+        await task.value
+    }
+
+    /// Injects favorite/custom tracks into the currently playing wave so they are queued next and
+    /// treated by both `WaveSessionTasteTracker` and Rotor API as liked tracks within the wave.
+    /// If wave mode is not currently active, gracefully starts a wave seeded with those tracks instead.
+    @discardableResult
+    public func addTracksToActiveWave(_ rawTracks: [YMTrack], showGlobalToast: Bool = true) async -> Int {
+        let resolved = await LikesService.shared.resolveTracks(rawTracks)
+        guard !resolved.isEmpty else { return 0 }
+
+        let engine = AudioPlayerEngine.shared
+        guard engine.isWaveMode else {
+            await startWaveWithTracksAsLiked(resolved)
+            return resolved.count
+        }
+
+        // Cancel any stale in-flight pagination batch so old Rotor recommendations won't overwrite the tuned tail
+        waveAdjustmentGeneration &+= 1
+        loadMoreTask?.cancel()
+        loadMoreTask = nil
+        isLoadingMoreWave = false
+        lastEmptyMoreTracksAt = nil
+
+        let accepted = engine.injectTracksIntoActiveWave(resolved)
+        guard !accepted.isEmpty else { return 0 }
+
+        waveTracks = engine.queue
+        for track in accepted {
+            tasteTracker.recordOutcome(.addedToWaveAsLiked, for: track)
+        }
+
+        let toastText: String
+        if accepted.count == 1, let single = accepted.first {
+            toastText = "В волну добавлен трек «\(single.displayTitle)» — поток подстраивается"
+        } else {
+            toastText = "В текущую волну добавлено треков: \(accepted.count) — поток подстраивается"
+        }
+        self.showToast(toastText)
+        if showGlobalToast {
+            PlaylistsService.shared.showToast(toastText)
+        }
+
+        let adjustmentSnapshot = waveAdjustmentGeneration
+        await RotorService.shared.incorporateManualLikedTracks(accepted)
+
+        guard engine.isWaveMode, waveAdjustmentGeneration == adjustmentSnapshot else {
+            return accepted.count
+        }
+
+        let upcomingCount = max(0, engine.queue.count - engine.currentIndex - 1)
+        if upcomingCount < 6 {
+            await loadMoreTracks()
+        }
+
+        return accepted.count
+    }
+
+    /// Starts a fresh wave seeded by user-selected tracks, placing those tracks first in the queue and
+    /// immediately continuing with Rotor recommendations aligned to them as liked anchors.
+    public func startWaveWithTracksAsLiked(_ rawTracks: [YMTrack]) async {
+        let resolved = await LikesService.shared.resolveTracks(rawTracks)
+        guard !resolved.isEmpty else { return }
+
+        let engine = AudioPlayerEngine.shared
+        guard engine.checkSubscriptionEligibility() else { return }
+
+        waveStartTask?.cancel()
+        loadMoreTask?.cancel()
+        loadMoreTask = nil
+        isLoadingMoreWave = false
+        waveAdjustmentGeneration &+= 1
+        let adjustmentSnapshot = waveAdjustmentGeneration
+
+        var anchors: [SavedWaveAnchorTrack] = []
+        var anchorSeeds: [String] = []
+        var seenClean = Set<String>()
+        var deduplicatedTracks: [YMTrack] = []
+
+        for track in resolved {
+            let cleanId = track.id.components(separatedBy: ":").first ?? track.id
+            if seenClean.insert(cleanId).inserted {
+                deduplicatedTracks.append(track)
+                if anchorSeeds.count < 5 {
+                    anchors.append(SavedWaveAnchorTrack(from: track))
+                    anchorSeeds.append("track:\(cleanId)")
+                }
+            }
+        }
+
+        let title = deduplicatedTracks.count == 1
+            ? "По треку «\(deduplicatedTracks[0].displayTitle)»"
+            : "Волна по выбранным (\(deduplicatedTracks.count))"
+
+        let context = YMWaveContext(
+            title: title,
+            subtitle: "Подобрано и отмечено как понравившееся",
+            seeds: anchorSeeds.isEmpty ? ["user:onyourwave"] : anchorSeeds,
+            fallbackStationId: anchorSeeds.first ?? "user:onyourwave",
+            fallbackTrackSeeds: anchorSeeds
+        )
+
+        activeSavedWaveId = nil
+        tasteTracker.beginFreshSession(context: context, vibe: .defaultWave)
+        for track in deduplicatedTracks {
+            tasteTracker.recordOutcome(.addedToWaveAsLiked, for: track)
+        }
+
+        isLoadingWave = true
+        errorMessage = nil
+        lastEmptyMoreTracksAt = nil
+
+        engine.activeWaveContext = context
+        engine.activeWaveVibe = .defaultWave
+        engine.isWaveMode = true
+
+        // Put user's chosen tracks immediately in the queue so playback starts right away without stalling
+        engine.setQueue(deduplicatedTracks, startingAt: 0)
+        waveTracks = engine.queue
+
+        let toastText = deduplicatedTracks.count == 1
+            ? "Запущена волна с треком «\(deduplicatedTracks[0].displayTitle)»"
+            : "Запущена волна с выбранными треками (\(deduplicatedTracks.count))"
+        showToast(toastText)
+        PlaylistsService.shared.showToast(toastText)
+
+        do {
+            let rotorTracks = try await RotorService.shared.startWave(
+                context: context,
+                vibe: .defaultWave,
+                excludedTrackIds: []
+            )
+            await RotorService.shared.incorporateManualLikedTracks(deduplicatedTracks)
+
+            guard waveAdjustmentGeneration == adjustmentSnapshot, engine.isWaveMode else {
+                isLoadingWave = false
+                return
+            }
+
+            let existingClean = Set(engine.queue.map { $0.id.components(separatedBy: ":").first ?? $0.id })
+            let tail = rotorTracks.filter {
+                let cleanId = $0.id.components(separatedBy: ":").first ?? $0.id
+                return !existingClean.contains(cleanId)
+            }
+            if !tail.isEmpty {
+                engine.appendToQueue(tail)
+                waveTracks = engine.queue
+            }
+        } catch {
+            if !Task.isCancelled {
+                print("[WaveSessionController] Error seeding wave from tracks: \(error)")
+            }
+        }
+        isLoadingWave = false
     }
 
     public func showToast(_ message: String) {

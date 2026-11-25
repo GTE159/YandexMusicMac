@@ -25,6 +25,7 @@ public actor RotorService {
     private var activeContext: YMWaveContext = .myWaveDefault
     private var activeVibe: YMWaveVibePreset = .defaultWave
     private var activeExcludedTrackIds: Set<String> = []
+    private var manualLikedTrackSeeds: [String] = []
 
     public private(set) var diagnostics: YMRotorDiagnostics = YMRotorDiagnostics()
     public var preferredAPIMode: YMRotorAPIMode {
@@ -103,6 +104,7 @@ public actor RotorService {
         self.activeV1StationId = nil
         self.isUsingV1Protocol = false
         self.activeExcludedTrackIds.removeAll()
+        self.manualLikedTrackSeeds.removeAll()
         self.seenTrackIds.removeAll()
         self.seenTrackIdList.removeAll()
         self.recentQueueIdentifiers.removeAll()
@@ -481,7 +483,14 @@ public actor RotorService {
                 // Check if session is expired or terminated -> transparently recreate v2 session
                 if result.unknownSession == true || result.terminated == true {
                     print("[RotorService] Session unknown/terminated, transparently recreating v2 session...")
-                    let seedsToUse = diagnostics.activeSeeds.isEmpty ? activeContext.seeds : diagnostics.activeSeeds
+                    var seedsToUse = diagnostics.activeSeeds.isEmpty ? activeContext.seeds : diagnostics.activeSeeds
+                    if !manualLikedTrackSeeds.isEmpty {
+                        var combined = manualLikedTrackSeeds + seedsToUse.filter { !manualLikedTrackSeeds.contains($0) && $0 != "user:onyourwave" }
+                        if combined.isEmpty {
+                            combined = seedsToUse
+                        }
+                        seedsToUse = Array(combined.prefix(5))
+                    }
                     let newReq = YMRotorSessionNewRequest(seeds: seedsToUse, queue: queueList)
                     let newBody = try encoder.encode(newReq)
 
@@ -688,24 +697,19 @@ public actor RotorService {
         return filtered.isEmpty ? tracks : filtered
     }
 
-    private func filterUniqueTracksWithStats(_ tracks: [YMTrack]) -> (unique: [YMTrack], duplicatesFiltered: Int) {
-        var result: [YMTrack] = []
-        var duplicates = 0
-        for track in tracks {
-            let cleanId = track.id.components(separatedBy: ":").first ?? track.id
-            if !seenTrackIds.contains(cleanId) && !seenTrackIds.contains(track.id) {
-                seenTrackIds.insert(cleanId)
-                seenTrackIdList.append(cleanId)
-                if track.id != cleanId {
-                    seenTrackIds.insert(track.id)
-                    seenTrackIdList.append(track.id)
-                }
-                recentQueueIdentifiers.append(track.rotorTrackIdentifier)
-                result.append(track)
-            } else {
-                duplicates += 1
-            }
+    private func registerTrackIdentifiersInHistory(for track: YMTrack) {
+        let cleanId = track.id.components(separatedBy: ":").first ?? track.id
+        seenTrackIds.insert(cleanId)
+        seenTrackIdList.append(cleanId)
+        if track.id != cleanId {
+            seenTrackIds.insert(track.id)
+            seenTrackIdList.append(track.id)
         }
+        recentQueueIdentifiers.append(track.rotorTrackIdentifier)
+        trimHistoryBuffers()
+    }
+
+    private func trimHistoryBuffers() {
         if seenTrackIdList.count > 500 {
             let overflow = seenTrackIdList.count - 500
             for id in seenTrackIdList.prefix(overflow) {
@@ -716,7 +720,64 @@ public actor RotorService {
         if recentQueueIdentifiers.count > 100 {
             recentQueueIdentifiers.removeFirst(recentQueueIdentifiers.count - 100)
         }
+    }
+
+    private func filterUniqueTracksWithStats(_ tracks: [YMTrack]) -> (unique: [YMTrack], duplicatesFiltered: Int) {
+        var result: [YMTrack] = []
+        var duplicates = 0
+        for track in tracks {
+            let cleanId = track.id.components(separatedBy: ":").first ?? track.id
+            if !seenTrackIds.contains(cleanId) && !seenTrackIds.contains(track.id) {
+                registerTrackIdentifiersInHistory(for: track)
+                result.append(track)
+            } else {
+                duplicates += 1
+            }
+        }
         return (result, duplicates)
+    }
+
+    /// Incorporates user-added tracks directly into the active wave session as if they had appeared in the wave
+    /// and were positively marked (`trackStarted` + `like`), clearing any prior exclusions and updating history
+    /// sequentially before fetching fresh Rotor batches.
+    public func incorporateManualLikedTracks(_ tracks: [YMTrack]) async {
+        let valid = tracks.filter { !$0.isPlaceholder && !$0.isSpacer }
+        guard !valid.isEmpty else { return }
+
+        let gen = sessionGeneration
+        var insightItems: [(trackId: String, insight: YMRotorTrackInsight)] = []
+        insightItems.reserveCapacity(valid.count)
+
+        for track in valid {
+            let cleanId = track.id.components(separatedBy: ":").first ?? track.id
+            activeExcludedTrackIds.remove(cleanId)
+            registerTrackIdentifiersInHistory(for: track)
+
+            let seed = "track:\(cleanId)"
+            manualLikedTrackSeeds.removeAll { $0 == seed }
+            manualLikedTrackSeeds.insert(seed, at: 0)
+            if manualLikedTrackSeeds.count > 5 {
+                manualLikedTrackSeeds = Array(manualLikedTrackSeeds.prefix(5))
+            }
+
+            let insight = YMRotorTrackInsight(waveText: "Добавлено вами в волну • понравившийся ориентир")
+            insightItems.append((track.id, insight))
+        }
+
+        if !insightItems.isEmpty {
+            let capturedInsights = insightItems
+            Task { @MainActor in
+                RotorDiagnosticsStore.shared.recordTrackInsights(capturedInsights)
+            }
+        }
+
+        // Send sequential start + like telemetry (capped at 10 tracks to avoid API bursts)
+        for track in valid.prefix(10) {
+            guard gen == sessionGeneration, !Task.isCancelled else { return }
+            try? await sendFeedback(type: .trackStarted, trackId: track.rotorTrackIdentifier)
+            guard gen == sessionGeneration, !Task.isCancelled else { return }
+            try? await sendFeedback(type: .like, trackId: track.rotorTrackIdentifier)
+        }
     }
 
     private func recordTrackInsights(from sequence: [YMRotorSequenceItem]) {

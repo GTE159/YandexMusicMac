@@ -440,4 +440,52 @@ struct OfflineStorageTests {
         reloadedSettings.setOfflineCacheLimitGB(999)
         #expect(reloadedSettings.offlineCacheLimitGB == 5)
     }
+
+    @Test("AudioQualitySettings custom offline cache limit parses, clamps, persists, and computes byte quota")
+    @MainActor
+    func testCustomOfflineCacheLimitSettings() {
+        let defaults = UserDefaults.standard
+        let presetKey = "ym_offline_cache_limit_gb"
+        let customEnabledKey = "ym_offline_cache_custom_enabled"
+        let customGBKey = "ym_offline_cache_custom_gb"
+        let prevPreset = defaults.object(forKey: presetKey)
+        let prevCustomEnabled = defaults.object(forKey: customEnabledKey)
+        let prevCustomGB = defaults.object(forKey: customGBKey)
+
+        defer {
+            if let prevPreset { defaults.set(prevPreset, forKey: presetKey) } else { defaults.removeObject(forKey: presetKey) }
+            if let prevCustomEnabled { defaults.set(prevCustomEnabled, forKey: customEnabledKey) } else { defaults.removeObject(forKey: customEnabledKey) }
+            if let prevCustomGB { defaults.set(prevCustomGB, forKey: customGBKey) } else { defaults.removeObject(forKey: customGBKey) }
+        }
+
+        defaults.removeObject(forKey: presetKey)
+        defaults.removeObject(forKey: customEnabledKey)
+        defaults.removeObject(forKey: customGBKey)
+
+        #expect(AudioQualitySettings.parseCustomCacheLimitGB("1,5") == 1.5)
+        #expect(AudioQualitySettings.parseCustomCacheLimitGB(" 35 ГБ ") == 35.0)
+        #expect(AudioQualitySettings.parseCustomCacheLimitGB("0.01") == 0.1)
+        #expect(AudioQualitySettings.parseCustomCacheLimitGB("9999") == 500.0)
+        #expect(AudioQualitySettings.parseCustomCacheLimitGB("-5") == nil)
+        #expect(AudioQualitySettings.parseCustomCacheLimitGB("abc") == nil)
+
+        let settings = AudioQualitySettings()
+        #expect(settings.offlineCacheCustomLimitEnabled == false)
+        #expect(settings.effectiveOfflineCacheLimitBytes == Int64(5) * 1_073_741_824)
+        #expect(settings.effectiveOfflineCacheLimitDisplay == "5 ГБ")
+
+        settings.setOfflineCacheCustomLimitGB(2.5)
+        settings.setOfflineCacheCustomLimitEnabled(true)
+
+        let reloaded = AudioQualitySettings()
+        #expect(reloaded.offlineCacheCustomLimitEnabled == true)
+        #expect(reloaded.offlineCacheCustomLimitGB == 2.5)
+        #expect(reloaded.effectiveOfflineCacheLimitDisplay == "2.5 ГБ")
+        #expect(reloaded.effectiveOfflineCacheLimitBytes == Int64((2.5 * 1_073_741_824.0).rounded()))
+
+        reloaded.setOfflineCacheLimitGB(0)
+        reloaded.setOfflineCacheCustomLimitEnabled(false)
+        #expect(reloaded.effectiveOfflineCacheLimitBytes == 0)
+        #expect(reloaded.effectiveOfflineCacheLimitDisplay == "Без лимита")
+    }
 }

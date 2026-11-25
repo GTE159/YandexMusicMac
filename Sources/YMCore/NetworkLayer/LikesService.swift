@@ -723,6 +723,90 @@ public final class LikesService {
         }
     }
 
+    /// Hydrates and returns all available favorite tracks in exact collection order (no placeholders).
+    public func resolveAllLikedTracksForBatchAction() async -> [YMTrack] {
+        await ensureInitialLikesLoaded()
+        await ensureAllLikedTracksLoadedForSearch()
+
+        var byCleanId: [String: YMTrack] = [:]
+        byCleanId.reserveCapacity(likedTracks.count + searchCatalog.count)
+        for track in likedTracks where !track.isPlaceholder && !track.isSpacer {
+            byCleanId[extractCleanId(from: track.id)] = track
+        }
+        for track in searchCatalog where !track.isPlaceholder && !track.isSpacer {
+            let cleanId = extractCleanId(from: track.id)
+            if byCleanId[cleanId] == nil {
+                byCleanId[cleanId] = track
+            }
+        }
+
+        if allLikedItems.isEmpty {
+            return likedTracks.filter { !$0.isPlaceholder && !$0.isSpacer && $0.available != false }
+        }
+
+        var result: [YMTrack] = []
+        result.reserveCapacity(allLikedItems.count)
+        var seen = Set<String>()
+        for item in allLikedItems {
+            let cleanId = extractCleanId(from: item.id)
+            guard seen.insert(cleanId).inserted else { continue }
+            if let track = byCleanId[cleanId], track.available != false {
+                result.append(track)
+            }
+        }
+        return result
+    }
+
+    /// Resolves any lazy placeholder items inside an arbitrary selection while preserving order.
+    public func resolveTracks(_ tracks: [YMTrack]) async -> [YMTrack] {
+        var placeholderIds: [String] = []
+        for track in tracks where track.isPlaceholder && !track.isSpacer {
+            let cleanId = extractCleanId(from: track.id)
+            if !unresolvableTrackIds.contains(cleanId) {
+                placeholderIds.append(cleanId)
+            }
+        }
+
+        var resolvedMap: [String: YMTrack] = [:]
+        for track in likedTracks where !track.isPlaceholder && !track.isSpacer {
+            resolvedMap[extractCleanId(from: track.id)] = track
+        }
+        for track in searchCatalog where !track.isPlaceholder && !track.isSpacer {
+            let cleanId = extractCleanId(from: track.id)
+            if resolvedMap[cleanId] == nil {
+                resolvedMap[cleanId] = track
+            }
+        }
+
+        let missingIds = placeholderIds.filter { resolvedMap[$0] == nil }
+        if !missingIds.isEmpty {
+            var index = 0
+            while index < missingIds.count {
+                let end = min(index + 100, missingIds.count)
+                let batch = Array(missingIds[index..<end])
+                if let fetched = try? await networkClient.fetchTracks(trackIds: batch) {
+                    for track in fetched {
+                        resolvedMap[extractCleanId(from: track.id)] = track
+                    }
+                }
+                index = end
+            }
+        }
+
+        var output: [YMTrack] = []
+        output.reserveCapacity(tracks.count)
+        for track in tracks where !track.isSpacer {
+            if !track.isPlaceholder {
+                if track.available != false {
+                    output.append(track)
+                }
+            } else if let hydrated = resolvedMap[extractCleanId(from: track.id)], hydrated.available != false {
+                output.append(hydrated)
+            }
+        }
+        return output
+    }
+
     /// Prunes searchCatalog buffer in eco-mode and compacts likedTracks memory
     public func pruneSearchCatalogIfNeeded() {
         guard !AudioQualitySettings.shared.preloadAllFavoritesInBackground else { return }

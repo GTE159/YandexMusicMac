@@ -359,55 +359,99 @@ public struct PlayerBarView: View {
                 }
             }
 
-            // Equalizer Floating Card Button
+            // Equalizer Floating Card Button (bypassed & dimmed during Exclusive Bit-Perfect mode)
             PlayerHoverIconButton(
                 systemName: "slider.vertical.3",
                 fontSize: windowState.isMiniWidth ? 11 : 12,
-                foregroundColor: (eqSettings.isEnabled || coordinator.isEqualizerPresented) ? YMTheme.accent : YMTheme.fg80,
-                isActive: eqSettings.isEnabled || coordinator.isEqualizerPresented,
+                foregroundColor: audioEngine.isExclusiveHogActive
+                    ? YMTheme.fg40
+                    : ((eqSettings.isEnabled || coordinator.isEqualizerPresented) ? YMTheme.accent : YMTheme.fg80),
+                isActive: !audioEngine.isExclusiveHogActive && (eqSettings.isEnabled || coordinator.isEqualizerPresented),
                 buttonSize: windowState.isMiniWidth ? 24 : 28,
-                helpText: eqSettings.isEnabled ? "Эквалайзер (включён)" : "Эквалайзер"
+                helpText: audioEngine.isExclusiveHogActive
+                    ? "Эквалайзер отключён в эксклюзивном Bit-Perfect режиме"
+                    : (eqSettings.isEnabled ? "Эквалайзер (включён)" : "Эквалайзер")
             ) {
                 withAnimation(.spring(response: 0.28, dampingFraction: 0.84)) {
                     coordinator.isEqualizerPresented.toggle()
                 }
             }
+            .opacity(audioEngine.isExclusiveHogActive ? 0.45 : 1.0)
 
             // Fixed-Width Quality Badge Menu (hidden in mini mode to prevent crowding)
             if !windowState.isMiniWidth {
                 AudioQualityMenu(audioEngine: audioEngine)
             }
 
-            // Volume Control (slider hidden in mini mode so playback controls & scrubber stay spacious at 440pt)
+            // Volume Control (bypassed at fixed 0 dB in Bit-Perfect mode; hidden in mini mode)
             HStack(spacing: 6) {
-                PlayerHoverIconButton(
-                    systemName: volumeIcon,
-                    fontSize: windowState.isMiniWidth ? 11 : 12,
-                    foregroundColor: YMTheme.fg60,
-                    isActive: false,
-                    buttonSize: windowState.isMiniWidth ? 24 : 28,
-                    helpText: isMuted ? "Включить звук" : "Выключить звук"
-                ) {
-                    toggleMute()
-                }
+                if audioEngine.isVolumeBypassedForBitPerfect {
+                    PlayerHoverIconButton(
+                        systemName: "speaker.wave.3.fill",
+                        fontSize: windowState.isMiniWidth ? 11 : 12,
+                        foregroundColor: YMTheme.accent,
+                        isActive: false,
+                        isDisabled: true,
+                        buttonSize: windowState.isMiniWidth ? 24 : 28,
+                        helpText: "В эксклюзивном режиме программная громкость отключена (0 дБ) — регулируйте громкость на ЦАПе или усилителе"
+                    ) {}
+                    .opacity(0.65)
 
-                if !windowState.isMiniWidth {
-                    YMSlider(
-                        value: Binding(
-                            get: { Double(audioEngine.volume) },
-                            set: {
-                                audioEngine.volume = Float($0)
-                                if $0 > 0 { isMuted = false }
-                            }
-                        ),
-                        in: 0...1,
-                        activeColor: YMTheme.fg,
-                        trackColor: YMTheme.borderHover,
-                        height: 3
-                    )
-                    .frame(width: 68)
-                    .frame(minHeight: 20)
-                    .contentShape(Rectangle())
+                    if !windowState.isMiniWidth {
+                        YMSlider(
+                            value: .constant(1.0),
+                            in: 0...1,
+                            activeColor: YMTheme.accent.opacity(0.6),
+                            trackColor: YMTheme.borderHover,
+                            height: 3
+                        )
+                        .frame(width: 48)
+                        .frame(minHeight: 20)
+                        .disabled(true)
+                        .opacity(0.45)
+                        .help("В эксклюзивном режиме программная громкость отключена (0 дБ) — регулируйте громкость на ЦАПе или усилителе")
+
+                        Text("0 дБ")
+                            .font(.system(size: 9.5, weight: .bold).monospacedDigit())
+                            .foregroundStyle(YMTheme.accent)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(
+                                Capsule(style: .continuous)
+                                    .fill(YMTheme.accent.opacity(0.14))
+                            )
+                            .help("Громкость фиксирована на уровне 0 дБ (управление на ЦАПе)")
+                    }
+                } else {
+                    PlayerHoverIconButton(
+                        systemName: volumeIcon,
+                        fontSize: windowState.isMiniWidth ? 11 : 12,
+                        foregroundColor: YMTheme.fg60,
+                        isActive: false,
+                        buttonSize: windowState.isMiniWidth ? 24 : 28,
+                        helpText: isMuted ? "Включить звук" : "Выключить звук"
+                    ) {
+                        toggleMute()
+                    }
+
+                    if !windowState.isMiniWidth {
+                        YMSlider(
+                            value: Binding(
+                                get: { Double(audioEngine.volume) },
+                                set: {
+                                    audioEngine.volume = Float($0)
+                                    if $0 > 0 { isMuted = false }
+                                }
+                            ),
+                            in: 0...1,
+                            activeColor: YMTheme.fg,
+                            trackColor: YMTheme.borderHover,
+                            height: 3
+                        )
+                        .frame(width: 68)
+                        .frame(minHeight: 20)
+                        .contentShape(Rectangle())
+                    }
                 }
             }
         }
@@ -477,9 +521,17 @@ private struct AudioQualityMenu: View {
                 }
             }
 
-            if let formatDetails = audioEngine.currentAudioFormatDetails {
-                Section("Аппаратный поток (AVPlayer)") {
-                    Text(formatDetails)
+            if audioEngine.currentAudioFormatDetails != nil || audioEngine.activeOutputDeviceName != nil || audioEngine.halStatusWarning != nil {
+                Section(audioEngine.isDirectHALActive ? "Аппаратный поток (CoreAudio HAL)" : "Аппаратный поток (AVPlayer)") {
+                    if let formatDetails = audioEngine.currentAudioFormatDetails {
+                        Text(formatDetails)
+                    }
+                    if let deviceName = audioEngine.activeOutputDeviceName {
+                        Text("Устройство: \(deviceName)")
+                    }
+                    if let warning = audioEngine.halStatusWarning {
+                        Text(warning)
+                    }
                 }
             }
 
@@ -500,26 +552,48 @@ private struct AudioQualityMenu: View {
                 }
             }
         } label: {
-            Text(badgeTitle)
-                .font(.system(size: 10, weight: .bold))
-                .lineLimit(1)
-                .frame(width: 76, alignment: .center)
-                .padding(.vertical, 4)
-                .background(badgeBackground)
-                .foregroundColor(badgeForeground)
-                .clipShape(Capsule())
-                .overlay(
-                    Capsule()
-                        .strokeBorder(isLosslessActive ? YMTheme.accent.opacity(0.3) : YMTheme.border, lineWidth: 1)
-                )
+            HStack(spacing: 4) {
+                if let iconName = badgeIconName {
+                    Image(systemName: iconName)
+                        .font(.system(size: 8.5, weight: .bold))
+                }
+                Text(badgeTitle)
+                    .font(.system(size: 10, weight: .bold))
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 8)
+            .frame(minWidth: 76, alignment: .center)
+            .padding(.vertical, 4)
+            .background(badgeBackground)
+            .foregroundColor(badgeForeground)
+            .clipShape(Capsule())
+            .overlay(
+                Capsule()
+                    .strokeBorder(isHighEmphasisBadge ? YMTheme.accent.opacity(audioEngine.isExclusiveHogActive ? 0.55 : 0.30) : YMTheme.border, lineWidth: 1)
+            )
         }
         .menuStyle(.borderlessButton)
-        .frame(width: 76)
         .fixedSize()
-        .help("Настройки качества звука")
+        .help(badgeHelpText)
+    }
+
+    private var badgeIconName: String? {
+        if audioEngine.isExclusiveHogActive {
+            return "lock.fill"
+        }
+        if audioEngine.isDirectHALActive {
+            return "waveform"
+        }
+        return nil
     }
 
     private var badgeTitle: String {
+        if audioEngine.isExclusiveHogActive {
+            return audioEngine.isVolumeBypassedForBitPerfect ? "BIT-PERFECT" : "EXCLUSIVE"
+        }
+        if audioEngine.isDirectHALActive {
+            return "DIRECT"
+        }
         if let info = audioEngine.currentStreamInfo {
             if info.isLossless {
                 return "LOSSLESS"
@@ -530,19 +604,32 @@ private struct AudioQualityMenu: View {
         return audioEngine.qualitySettings.preset.shortBadge
     }
 
-    private var isLosslessActive: Bool {
-        audioEngine.currentStreamInfo?.isLossless == true || audioEngine.qualitySettings.preset == .lossless
+    private var badgeHelpText: String {
+        if let details = audioEngine.currentAudioFormatDetails {
+            return "Настройки качества звука (\(details))"
+        }
+        return "Настройки качества звука"
+    }
+
+    private var isHighEmphasisBadge: Bool {
+        audioEngine.isExclusiveHogActive ||
+        audioEngine.isDirectHALActive ||
+        audioEngine.currentStreamInfo?.isLossless == true ||
+        audioEngine.qualitySettings.preset == .lossless
     }
 
     private var badgeBackground: Color {
-        if isLosslessActive {
+        if audioEngine.isExclusiveHogActive {
+            return YMTheme.accent.opacity(0.24)
+        }
+        if isHighEmphasisBadge {
             return YMTheme.accent.opacity(0.18)
         }
         return YMTheme.surfaceComponent
     }
 
     private var badgeForeground: Color {
-        if isLosslessActive {
+        if isHighEmphasisBadge {
             return YMTheme.accent
         }
         return YMTheme.fg80

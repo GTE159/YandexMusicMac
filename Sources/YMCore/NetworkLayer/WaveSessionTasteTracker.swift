@@ -254,54 +254,10 @@ public final class WaveSessionTasteTracker {
             }
 
         case .liked:
-            consecutiveQuickSkips = 0
-            excludedIdsOrder.removeAll { $0 == cleanId }
-            if var existing = signals[cleanId] {
-                existing.score = Self.clamped(existing.score + 4.5)
-                existing.isHardExcluded = false
-                existing.isQuickSkipped = false
-                existing.lastTouchedAt = now
-                existing.touchSequence = seq
-                signals[cleanId] = existing
-            } else {
-                signals[cleanId] = TrackSignal(
-                    anchor: SavedWaveAnchorTrack(from: track),
-                    score: 4.5,
-                    lastTouchedAt: now,
-                    touchSequence: seq,
-                    isHardExcluded: false,
-                    isQuickSkipped: false,
-                    isFromBaselinePreset: false
-                )
-            }
-            if baselinePreset != nil {
-                hasPendingStyleDrift = true
-            }
+            recordPositiveSignalBoost(for: track, delta: 4.5, markDrift: true, at: now, seq: seq)
 
-        case .moreLikeThis:
-            consecutiveQuickSkips = 0
-            excludedIdsOrder.removeAll { $0 == cleanId }
-            if var existing = signals[cleanId] {
-                existing.score = Self.clamped(existing.score + 5.5)
-                existing.isHardExcluded = false
-                existing.isQuickSkipped = false
-                existing.lastTouchedAt = now
-                existing.touchSequence = seq
-                signals[cleanId] = existing
-            } else {
-                signals[cleanId] = TrackSignal(
-                    anchor: SavedWaveAnchorTrack(from: track),
-                    score: 5.5,
-                    lastTouchedAt: now,
-                    touchSequence: seq,
-                    isHardExcluded: false,
-                    isQuickSkipped: false,
-                    isFromBaselinePreset: false
-                )
-            }
-            if baselinePreset != nil {
-                hasPendingStyleDrift = true
-            }
+        case .moreLikeThis, .addedToWaveAsLiked:
+            recordPositiveSignalBoost(for: track, delta: 5.5, markDrift: true, at: now, seq: seq)
 
         case .lessLikeThis:
             consecutiveQuickSkips = 0
@@ -470,6 +426,42 @@ public final class WaveSessionTasteTracker {
     }
 
     // MARK: - Helpers
+
+    private func recordPositiveSignalBoost(
+        for track: YMTrack,
+        delta: Double,
+        markDrift: Bool,
+        at now: Date,
+        seq: UInt64
+    ) {
+        let cleanId = Self.cleanTrackId(from: track.id)
+        consecutiveQuickSkips = 0
+        excludedIdsOrder.removeAll { $0 == cleanId }
+        if var existing = signals[cleanId] {
+            existing.score = Self.clamped(existing.score + delta)
+            existing.isHardExcluded = false
+            existing.isQuickSkipped = false
+            existing.lastTouchedAt = now
+            existing.touchSequence = seq
+            if existing.anchor.coverUri == nil, track.effectiveCoverUri != nil {
+                existing.anchor = SavedWaveAnchorTrack(from: track)
+            }
+            signals[cleanId] = existing
+        } else {
+            signals[cleanId] = TrackSignal(
+                anchor: SavedWaveAnchorTrack(from: track),
+                score: Self.clamped(delta),
+                lastTouchedAt: now,
+                touchSequence: seq,
+                isHardExcluded: false,
+                isQuickSkipped: false,
+                isFromBaselinePreset: false
+            )
+        }
+        if markDrift && baselinePreset != nil {
+            hasPendingStyleDrift = true
+        }
+    }
 
     private func rankKey(for signal: TrackSignal) -> (Int, Int, Double, UInt64) {
         let isNewStrong = (!signal.isFromBaselinePreset && signal.score >= 2.0) ? 1 : 0

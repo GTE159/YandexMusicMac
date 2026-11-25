@@ -31,8 +31,16 @@ public final class AudioPlayerEngine {
     @ObservationIgnored private var unshuffledQueue: [YMTrack] = []
     public var onStartCustomWaveRequested: (@Sendable (YMWaveContext, YMWaveVibePreset?) -> Void)?
 
-    /// Hardware audio track format details (sample rate, channel layout) from AVPlayerItem
+    /// Hardware audio track format details (sample rate, channel layout) from AVPlayerItem or CoreAudio HAL
     public private(set) var currentAudioFormatDetails: String?
+
+    /// CoreAudio HAL / Bit-Perfect state exposed for UI indicators & warnings
+    public private(set) var isDirectHALActive: Bool = false
+    public private(set) var isExclusiveHogActive: Bool = false
+    public private(set) var isVolumeBypassedForBitPerfect: Bool = false
+    public private(set) var activeOutputDeviceName: String? = nil
+    public private(set) var activeDeviceSampleRate: Double? = nil
+    public private(set) var halStatusWarning: String? = nil
 
     public var isSubscriptionRequiredPresented: Bool = false
 
@@ -90,7 +98,12 @@ public final class AudioPlayerEngine {
     }
 
     private var actualPlaybackTime: Double {
-        if player.currentItem != nil {
+        if isUsingHALForCurrentTrack {
+            let sec = halPlayer.currentTime
+            if sec.isFinite && sec >= 0 {
+                return sec
+            }
+        } else if player.currentItem != nil {
             let sec = CMTimeGetSeconds(player.currentTime())
             if sec.isFinite && sec >= 0 {
                 return sec
@@ -110,6 +123,10 @@ public final class AudioPlayerEngine {
 
     @ObservationIgnored private var player = AVPlayer()
     @ObservationIgnored private var outgoingPlayer: AVPlayer?
+    @ObservationIgnored private let halPlayer = CoreAudioHALPlayer()
+    @ObservationIgnored private var isUsingHALForCurrentTrack: Bool = false
+    @ObservationIgnored private var halPlayTask: Task<Void, Never>?
+    @ObservationIgnored private var halSettingsReloadTask: Task<Void, Never>?
     @ObservationIgnored private var crossfadeTimer: Timer?
     @ObservationIgnored private var isCrossfading: Bool = false
     @ObservationIgnored private var currentFadeGain: Float = 1.0
@@ -153,6 +170,7 @@ public final class AudioPlayerEngine {
     @ObservationIgnored private var lastSyncedDuration: Double = 0
     @ObservationIgnored private var suppressNextSkipTelemetry: Bool = false
     @ObservationIgnored private var pendingWaveAdvance: Bool = false
+    @ObservationIgnored private var manuallyPinnedWaveCleanIds: Set<String> = []
 
     // Paginated non-wave queue continuation (Favorites, Search, etc.)
     public typealias QueueContinuationProvider = @MainActor (_ existingTrackIds: Set<String>) async -> [YMTrack]
@@ -181,6 +199,8 @@ public final class AudioPlayerEngine {
         }
         applyEffectiveVolumes()
         _ = EqualizerSettings.shared
+        ProgressiveHTTPAudioDataSource.cleanupStaleTempFiles()
+        setupHALCallbacks()
         setupSystemObservers()
         setupTimeObserver()
     }
@@ -190,6 +210,12 @@ public final class AudioPlayerEngine {
         activeOfflineLoaderDelegate?.invalidate()
         activeOfflineLoaderDelegate = nil
         isCurrentItemOffline = false
+        halPlayTask?.cancel()
+        halPlayTask = nil
+        halSettingsReloadTask?.cancel()
+        halSettingsReloadTask = nil
+        halPlayer.stopAndRelease()
+        clearHALState()
         loadTask?.cancel()
         loadTask = nil
         prefetchTask?.cancel()
@@ -206,6 +232,46 @@ public final class AudioPlayerEngine {
     private func applyEffectiveVolumes() {
         player.volume = volume * currentFadeGain
         outgoingPlayer?.volume = volume * outgoingFadeGain
+        halPlayer.volume = volume
+    }
+
+    private func clearHALState() {
+        isUsingHALForCurrentTrack = false
+        isDirectHALActive = false
+        isExclusiveHogActive = false
+        isVolumeBypassedForBitPerfect = false
+        activeOutputDeviceName = nil
+        activeDeviceSampleRate = nil
+        halStatusWarning = nil
+    }
+
+    private func applyHALMetadata(_ meta: CoreAudioHALPlayer.StreamMetadata, isActivePlayback: Bool) {
+        isUsingHALForCurrentTrack = true
+        isDirectHALActive = true
+        isExclusiveHogActive = isActivePlayback && meta.deviceSession.hogModeAcquired
+        isVolumeBypassedForBitPerfect = isActivePlayback && meta.deviceSession.hogModeAcquired && qualitySettings.bitPerfectFixedVolume
+        activeOutputDeviceName = meta.deviceSession.deviceName
+        activeDeviceSampleRate = meta.deviceSession.actualSampleRate
+        halStatusWarning = meta.deviceSession.warningMessage
+
+        let srcHz = Self.formatSampleRateKHz(meta.sourceSampleRate)
+        let dacHz = Self.formatSampleRateKHz(meta.deviceSession.actualSampleRate)
+        let modeBadge: String
+        if meta.deviceSession.hogModeAcquired {
+            modeBadge = meta.deviceSession.integerModeActive ? "Bit-Perfect Integer" : "Exclusive Hog"
+        } else {
+            modeBadge = "Direct HAL"
+        }
+        currentAudioFormatDetails = "\(meta.sourceBitDepth)-bit / \(srcHz) → ЦАП \(dacHz) · \(modeBadge)"
+    }
+
+    private static func formatSampleRateKHz(_ hz: Double) -> String {
+        guard hz.isFinite && hz > 0 else { return "44.1 кГц" }
+        let roundedHz = Int(hz.rounded())
+        if roundedHz % 1000 == 0 {
+            return "\(roundedHz / 1000) кГц"
+        }
+        return String(format: "%.1f кГц", hz / 1000.0)
     }
 
     private func cancelCrossfade(stopOutgoing: Bool = true) {
@@ -247,6 +313,7 @@ public final class AudioPlayerEngine {
         }
         guard checkSubscriptionEligibility() else { return }
         resetQueueContinuation()
+        manuallyPinnedWaveCleanIds.removeAll()
         if !keepShuffle {
             self.isShuffleEnabled = false
             self.unshuffledQueue = [] // Не дублируем память, пока Shuffle не включен
@@ -356,6 +423,10 @@ public final class AudioPlayerEngine {
         let insertIndex = currentIndex + 1
         if insertIndex <= queue.count {
             self.queue.insert(track, at: insertIndex)
+            if insertIndex == currentIndex + 1 {
+                self.hasPrefetchedNextTrack = false
+                self.nextPreloadedStream = nil
+            }
             if !isWaveMode && isShuffleEnabled {
                 self.unshuffledQueue.append(track)
             }
@@ -363,6 +434,82 @@ public final class AudioPlayerEngine {
         } else {
             appendToQueue([track])
         }
+    }
+
+    /// Injects user-selected tracks straight into the currently active wave right after any previously
+    /// user-pinned upcoming tracks, dropping stale unpinned Rotor recommendations behind them while keeping
+    /// current track playback uninterrupted and avoiding duplicates.
+    @discardableResult
+    public func injectTracksIntoActiveWave(_ rawTracks: [YMTrack]) -> [YMTrack] {
+        guard isWaveMode else { return [] }
+
+        let validInput = rawTracks.filter { !$0.isPlaceholder && !$0.isSpacer }
+        guard !validInput.isEmpty else { return [] }
+
+        let currentCleanId = currentTrack.map { OfflineTrackID.clean($0.id) }
+        if currentIndex + 1 < queue.count {
+            let upcomingCleanSet = Set(queue[(currentIndex + 1)...].map { OfflineTrackID.clean($0.id) })
+            manuallyPinnedWaveCleanIds = manuallyPinnedWaveCleanIds.intersection(upcomingCleanSet)
+        } else {
+            manuallyPinnedWaveCleanIds.removeAll()
+        }
+
+        var seenBatch = Set<String>()
+        var accepted: [YMTrack] = []
+        var tracksToInsert: [YMTrack] = []
+        for track in validInput {
+            let cleanId = OfflineTrackID.clean(track.id)
+            guard seenBatch.insert(cleanId).inserted else { continue }
+            accepted.append(track)
+            if cleanId == currentCleanId {
+                continue
+            }
+            tracksToInsert.append(track)
+        }
+
+        if queue.isEmpty {
+            if !tracksToInsert.isEmpty {
+                for t in tracksToInsert {
+                    manuallyPinnedWaveCleanIds.insert(OfflineTrackID.clean(t.id))
+                }
+                self.queue = tracksToInsert
+                self.currentIndex = 0
+                playTrack(at: 0)
+            }
+            return accepted
+        }
+
+        if !tracksToInsert.isEmpty {
+            let insertCleanSet = Set(tracksToInsert.map { OfflineTrackID.clean($0.id) })
+            var preservedPinned: [YMTrack] = []
+            if currentIndex + 1 < queue.count {
+                for upcoming in queue[(currentIndex + 1)...] {
+                    let cleanId = OfflineTrackID.clean(upcoming.id)
+                    if manuallyPinnedWaveCleanIds.contains(cleanId) && !insertCleanSet.contains(cleanId) {
+                        preservedPinned.append(upcoming)
+                    }
+                }
+            }
+
+            let prefixEnd = min(currentIndex + 1, queue.count)
+            let prefix = Array(queue[0..<prefixEnd])
+            for t in tracksToInsert {
+                manuallyPinnedWaveCleanIds.insert(OfflineTrackID.clean(t.id))
+            }
+
+            let hadPendingAdvance = pendingWaveAdvance
+            pendingWaveAdvance = false
+            self.queue = prefix + preservedPinned + tracksToInsert
+            self.hasPrefetchedNextTrack = false
+            self.nextPreloadedStream = nil
+            syncNowPlayingQueue()
+
+            if hadPendingAdvance && currentIndex + 1 < queue.count {
+                playTrack(at: currentIndex + 1)
+            }
+        }
+
+        return accepted
     }
 
     public func appendToQueue(_ tracks: [YMTrack]) {
@@ -413,6 +560,7 @@ public final class AudioPlayerEngine {
 
         self.currentIndex = index
         let track = queue[index]
+        manuallyPinnedWaveCleanIds.remove(OfflineTrackID.clean(track.id))
         self.currentTrack = track
         self.hasPrefetchedNextTrack = false
         self.currentStreamRetryCount = 0
@@ -443,6 +591,29 @@ public final class AudioPlayerEngine {
     public func play() {
         guard checkSubscriptionEligibility() else { return }
         guard currentTrack != nil else { return }
+        if isUsingHALForCurrentTrack {
+            halPlayTask?.cancel()
+            halPlayTask = Task { @MainActor [weak self] in
+                guard let self, self.isUsingHALForCurrentTrack else { return }
+                do {
+                    try await self.halPlayer.play()
+                    guard !Task.isCancelled, self.isUsingHALForCurrentTrack else { return }
+                    if let meta = self.halPlayer.activeMetadata {
+                        self.applyHALMetadata(meta, isActivePlayback: true)
+                    }
+                    self.trackStartTimestamp = Date()
+                    self.isPlaying = true
+                    NowPlayingController.shared.updatePlaybackState(isPlaying: true, currentTime: self.actualPlaybackTime)
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    print("[AudioEngine] HAL resume error: \(error)")
+                    self.halStatusWarning = "Ошибка возобновления эксклюзивного вывода — переключено на стандартный плеер"
+                    self.clearHALState()
+                    self.reloadCurrentTrackStream(forceRefresh: false, forceAutoPlay: true)
+                }
+            }
+            return
+        }
         if timeObserverToken == nil {
             setupTimeObserver()
         }
@@ -459,6 +630,16 @@ public final class AudioPlayerEngine {
 
     public func pause() {
         recordPlaybackSession() // Fix: Record played seconds BEFORE setting isPlaying = false!
+        halPlayTask?.cancel()
+        halPlayTask = nil
+        if isUsingHALForCurrentTrack {
+            halPlayer.pause()
+            isExclusiveHogActive = false
+            isVolumeBypassedForBitPerfect = false
+            isPlaying = false
+            NowPlayingController.shared.updatePlaybackState(isPlaying: false, currentTime: actualPlaybackTime)
+            return
+        }
         player.pause()
         if isCrossfading {
             outgoingPlayer?.pause()
@@ -472,6 +653,12 @@ public final class AudioPlayerEngine {
         activeOfflineLoaderDelegate?.invalidate()
         activeOfflineLoaderDelegate = nil
         isCurrentItemOffline = false
+        halPlayTask?.cancel()
+        halPlayTask = nil
+        halSettingsReloadTask?.cancel()
+        halSettingsReloadTask = nil
+        halPlayer.stopAndRelease()
+        clearHALState()
         loadTask?.cancel()
         loadTask = nil
         prefetchTask?.cancel()
@@ -493,6 +680,7 @@ public final class AudioPlayerEngine {
         activeWaveVibe = .defaultWave
         suppressNextSkipTelemetry = false
         pendingWaveAdvance = false
+        manuallyPinnedWaveCleanIds.removeAll()
         resetQueueContinuation()
         currentStreamInfo = nil
         availableStreamInfos = []
@@ -541,6 +729,12 @@ public final class AudioPlayerEngine {
         progressTracker.seekLockUntil = Date().addingTimeInterval(0.4)
         lastObservedPlaybackTime = seconds
         lastPublishedProgressTime = seconds
+        if isUsingHALForCurrentTrack {
+            halPlayer.seek(to: seconds)
+            progressTracker.seekLockUntil = .distantPast
+            NowPlayingController.shared.updatePlaybackPosition(seconds: seconds, isPlaying: isPlaying)
+            return
+        }
         let cmTime = CMTime(seconds: seconds, preferredTimescale: 600)
         player.seek(to: cmTime, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] completed in
             Task { @MainActor [weak self] in
@@ -676,6 +870,8 @@ public final class AudioPlayerEngine {
     private func loadAndPlay(track: YMTrack, seekTo seekSeconds: Double?, autoPlay: Bool = true, forceRefresh: Bool = false, isInitialTrackStart: Bool = true) {
         guard checkSubscriptionEligibility() else { return }
         loadTask?.cancel()
+        halPlayTask?.cancel()
+        halPlayTask = nil
         NavigationCoordinator.shared.lyricsTrack = nil
         if timeObserverToken == nil {
             setupTimeObserver()
@@ -683,6 +879,12 @@ public final class AudioPlayerEngine {
         self.isLoading = true
         let initialDuration = Double(track.durationMs ?? 0) / 1000.0
         self.progressTracker.update(currentTime: seekSeconds ?? 0, duration: initialDuration)
+
+        let useHAL = qualitySettings.usesDirectHALBackend
+        if !useHAL {
+            halPlayer.stopAndRelease()
+            clearHALState()
+        }
 
         loadTask = Task { [weak self] in
             guard let self = self else { return }
@@ -692,35 +894,58 @@ public final class AudioPlayerEngine {
                let uid = AuthService.shared.currentUser?.userId ?? KeychainManager.shared.getUserId(),
                let offlineRecord = await OfflineStorageStore.shared.record(for: cleanTrackId, ownerUid: uid) {
                 let fileURL = await OfflineStorageStore.shared.audioFileURL(for: offlineRecord)
-                if FileManager.default.fileExists(atPath: fileURL.path),
-                   let built = OfflineAssetResourceLoaderDelegate.makeAsset(
-                       fileURL: fileURL,
-                       trackId: offlineRecord.id,
-                       codec: offlineRecord.codec,
-                       key: OfflineCrypto.audioKey
-                   ) {
-                    guard !Task.isCancelled, self.currentTrack?.id == track.id else {
-                        built.delegate.invalidate()
+                if FileManager.default.fileExists(atPath: fileURL.path) {
+                    if useHAL {
+                        guard !Task.isCancelled, self.currentTrack?.id == track.id else { return }
+                        let syntheticInfo = YMDownloadInfo(
+                            codec: offlineRecord.codec,
+                            bitrateInKbps: offlineRecord.bitrateInKbps,
+                            downloadInfoUrl: fileURL,
+                            direct: true,
+                            lossless: offlineRecord.isLossless
+                        )
+                        self.currentStreamInfo = syntheticInfo
+                        self.availableStreamInfos = [syntheticInfo]
+                        await self.startHALPlayback(
+                            track: track,
+                            seekTo: seekSeconds,
+                            autoPlay: autoPlay,
+                            isInitialTrackStart: isInitialTrackStart,
+                            offlineRecord: offlineRecord,
+                            resolvedStream: nil
+                        )
                         return
                     }
-                    let syntheticInfo = YMDownloadInfo(
+
+                    if let built = OfflineAssetResourceLoaderDelegate.makeAsset(
+                        fileURL: fileURL,
+                        trackId: offlineRecord.id,
                         codec: offlineRecord.codec,
-                        bitrateInKbps: offlineRecord.bitrateInKbps,
-                        downloadInfoUrl: built.asset.url,
-                        direct: true,
-                        lossless: offlineRecord.isLossless
-                    )
-                    self.currentStreamInfo = syntheticInfo
-                    self.availableStreamInfos = [syntheticInfo]
-                    self.attachPreparedAsset(
-                        built.asset,
-                        offlineDelegate: built.delegate,
-                        for: track,
-                        seekTo: seekSeconds,
-                        autoPlay: autoPlay,
-                        isInitialTrackStart: isInitialTrackStart
-                    )
-                    return
+                        key: OfflineCrypto.audioKey
+                    ) {
+                        guard !Task.isCancelled, self.currentTrack?.id == track.id else {
+                            built.delegate.invalidate()
+                            return
+                        }
+                        let syntheticInfo = YMDownloadInfo(
+                            codec: offlineRecord.codec,
+                            bitrateInKbps: offlineRecord.bitrateInKbps,
+                            downloadInfoUrl: built.asset.url,
+                            direct: true,
+                            lossless: offlineRecord.isLossless
+                        )
+                        self.currentStreamInfo = syntheticInfo
+                        self.availableStreamInfos = [syntheticInfo]
+                        self.attachPreparedAsset(
+                            built.asset,
+                            offlineDelegate: built.delegate,
+                            for: track,
+                            seekTo: seekSeconds,
+                            autoPlay: autoPlay,
+                            isInitialTrackStart: isInitialTrackStart
+                        )
+                        return
+                    }
                 }
             }
 
@@ -746,6 +971,8 @@ public final class AudioPlayerEngine {
             guard !Task.isCancelled, self.currentTrack?.id == track.id else { return }
 
             guard let stream = resolvedStream else {
+                self.halPlayer.stopAndRelease()
+                self.clearHALState()
                 self.isLoading = false
                 self.isPlaying = false
                 self.cancelCrossfade(stopOutgoing: true)
@@ -756,7 +983,199 @@ public final class AudioPlayerEngine {
             self.currentStreamInfo = stream.downloadInfo
             self.availableStreamInfos = stream.allAvailableInfos
 
-            self.attachPlayerItem(with: stream.url, for: track, seekTo: seekSeconds, autoPlay: autoPlay, isInitialTrackStart: isInitialTrackStart)
+            if useHAL {
+                await self.startHALPlayback(
+                    track: track,
+                    seekTo: seekSeconds,
+                    autoPlay: autoPlay,
+                    isInitialTrackStart: isInitialTrackStart,
+                    offlineRecord: nil,
+                    resolvedStream: stream
+                )
+            } else {
+                self.attachPlayerItem(with: stream.url, for: track, seekTo: seekSeconds, autoPlay: autoPlay, isInitialTrackStart: isInitialTrackStart)
+            }
+        }
+    }
+
+    private func startHALPlayback(
+        track: YMTrack,
+        seekTo seekSeconds: Double?,
+        autoPlay: Bool,
+        isInitialTrackStart: Bool,
+        offlineRecord: OfflineTrackRecord?,
+        resolvedStream: YMNetworkClient.YMResolvedAudioStream?
+    ) async {
+        cancelCrossfade(stopOutgoing: true)
+        detachItemObservers()
+        player.pause()
+        player.replaceCurrentItem(with: nil)
+        activeOfflineLoaderDelegate?.invalidate()
+        activeOfflineLoaderDelegate = nil
+        isCurrentItemOffline = (offlineRecord != nil)
+
+        halPlayTask?.cancel()
+        halPlayTask = nil
+        halPlayer.stopAndRelease()
+        clearHALState()
+        currentAudioFormatDetails = nil
+        currentStreamFetchedAt = Date()
+
+        do {
+            let source: AudioByteDataSource
+            let codec: String
+
+            if let record = offlineRecord {
+                let fileURL = await OfflineStorageStore.shared.audioFileURL(for: record)
+                guard FileManager.default.fileExists(atPath: fileURL.path) else {
+                    throw NSError(domain: "com.flow.hal", code: -2, userInfo: [
+                        NSLocalizedDescriptionKey: "Оффлайн файл трека не найден."
+                    ])
+                }
+                source = try OfflineEncryptedAudioDataSource(
+                    fileURL: fileURL,
+                    trackId: record.id,
+                    codec: record.codec,
+                    key: OfflineCrypto.audioKey
+                )
+                codec = record.codec
+            } else if let stream = resolvedStream {
+                source = try await ProgressiveHTTPAudioDataSource.open(url: stream.url, codec: stream.downloadInfo.codec)
+                codec = stream.downloadInfo.codec
+            } else {
+                throw YMAPIError.emptyResult
+            }
+
+            guard !Task.isCancelled, self.currentTrack?.id == track.id else {
+                source.close()
+                return
+            }
+
+            halPlayer.volume = self.volume
+            let meta = try await halPlayer.loadAndStart(
+                source: source,
+                codec: codec,
+                seekTo: seekSeconds,
+                autoPlay: autoPlay,
+                preferredDeviceUID: qualitySettings.audioOutputDeviceUID,
+                switchSampleRate: qualitySettings.autoSampleRateSwitching,
+                requestHogMode: qualitySettings.exclusiveHogMode,
+                bypassVolume: qualitySettings.bitPerfectFixedVolume
+            )
+
+            guard !Task.isCancelled, self.currentTrack?.id == track.id else {
+                halPlayer.stopAndRelease()
+                clearHALState()
+                return
+            }
+
+            applyHALMetadata(meta, isActivePlayback: autoPlay)
+            let validDur = meta.durationSeconds > 0 ? meta.durationSeconds : (Double(track.durationMs ?? 0) / 1000.0)
+            let initialPos = max(0.0, seekSeconds ?? 0.0)
+            progressTracker.update(currentTime: initialPos, duration: validDur)
+            lastObservedPlaybackTime = initialPos
+            lastPublishedProgressTime = initialPos
+
+            if autoPlay {
+                self.isPlaying = true
+                self.trackStartTimestamp = Date()
+            } else {
+                self.isPlaying = false
+            }
+            self.isLoading = false
+            notifyTrackStartedMetadata(
+                track,
+                seekSeconds: initialPos,
+                autoPlay: autoPlay,
+                isInitialTrackStart: isInitialTrackStart
+            )
+        } catch {
+            if error is CancellationError || Task.isCancelled || self.currentTrack?.id != track.id {
+                return
+            }
+            if let apiErr = error as? YMAPIError, case .streamExpired = apiErr {
+                print("[AudioEngine] HAL stream expired (401/403). Retrying stream resolution...")
+                halPlayer.stopAndRelease()
+                clearHALState()
+                handleStreamFailure()
+                return
+            }
+
+            print("[AudioEngine] CoreAudio HAL failed (\(error)). Falling back to AVPlayer...")
+            halPlayer.stopAndRelease()
+            clearHALState()
+            let fallbackMsg = "Ошибка эксклюзивного вывода (\(error.localizedDescription)) — переключено на стандартный плеер"
+
+            if let record = offlineRecord {
+                let fileURL = await OfflineStorageStore.shared.audioFileURL(for: record)
+                if FileManager.default.fileExists(atPath: fileURL.path),
+                   let built = OfflineAssetResourceLoaderDelegate.makeAsset(
+                       fileURL: fileURL,
+                       trackId: record.id,
+                       codec: record.codec,
+                       key: OfflineCrypto.audioKey
+                   ) {
+                    self.halStatusWarning = fallbackMsg
+                    let syntheticInfo = YMDownloadInfo(
+                        codec: record.codec,
+                        bitrateInKbps: record.bitrateInKbps,
+                        downloadInfoUrl: built.asset.url,
+                        direct: true,
+                        lossless: record.isLossless
+                    )
+                    self.currentStreamInfo = syntheticInfo
+                    self.availableStreamInfos = [syntheticInfo]
+                    self.attachPreparedAsset(
+                        built.asset,
+                        offlineDelegate: built.delegate,
+                        for: track,
+                        seekTo: seekSeconds,
+                        autoPlay: autoPlay,
+                        isInitialTrackStart: isInitialTrackStart
+                    )
+                    return
+                }
+            }
+
+            if let stream = resolvedStream {
+                self.halStatusWarning = fallbackMsg
+                self.attachPlayerItem(
+                    with: stream.url,
+                    for: track,
+                    seekTo: seekSeconds,
+                    autoPlay: autoPlay,
+                    isInitialTrackStart: isInitialTrackStart
+                )
+            } else {
+                self.halStatusWarning = fallbackMsg
+                self.isLoading = false
+                self.isPlaying = false
+            }
+        }
+    }
+
+    private func notifyTrackStartedMetadata(
+        _ track: YMTrack,
+        seekSeconds: Double,
+        autoPlay: Bool,
+        isInitialTrackStart: Bool
+    ) {
+        if isInitialTrackStart {
+            NowPlayingController.shared.updateTrack(
+                track,
+                isPlaying: autoPlay,
+                currentTime: seekSeconds,
+                queueIndex: currentIndex,
+                queueCount: queue.count,
+                collectionIdentifier: currentCollectionIdentifier
+            )
+            RemoteCommandManager.shared.updateLikeState(isLiked: LikesService.shared.isLiked(trackId: track.id))
+            onTrackStarted?(track)
+            if isWaveMode {
+                onWaveTrackOutcome?(track, .started)
+            }
+        } else {
+            NowPlayingController.shared.updatePlaybackPosition(currentTime: seekSeconds, isPlaying: autoPlay)
         }
     }
 
@@ -890,23 +1309,12 @@ public final class AudioPlayerEngine {
                         self.isPlaying = false
                     }
                     self.isLoading = false
-                    if isInitialTrackStart {
-                        NowPlayingController.shared.updateTrack(
-                            track,
-                            isPlaying: autoPlay,
-                            currentTime: seekSeconds,
-                            queueIndex: self.currentIndex,
-                            queueCount: self.queue.count,
-                            collectionIdentifier: self.currentCollectionIdentifier
-                        )
-                        RemoteCommandManager.shared.updateLikeState(isLiked: LikesService.shared.isLiked(trackId: track.id))
-                        self.onTrackStarted?(track)
-                        if self.isWaveMode {
-                            self.onWaveTrackOutcome?(track, .started)
-                        }
-                    } else {
-                        NowPlayingController.shared.updatePlaybackPosition(currentTime: seekSeconds, isPlaying: autoPlay)
-                    }
+                    self.notifyTrackStartedMetadata(
+                        track,
+                        seekSeconds: seekSeconds,
+                        autoPlay: autoPlay,
+                        isInitialTrackStart: isInitialTrackStart
+                    )
                 }
             }
         } else {
@@ -918,22 +1326,12 @@ public final class AudioPlayerEngine {
                 isPlaying = false
             }
             isLoading = false
-            if isInitialTrackStart {
-                NowPlayingController.shared.updateTrack(
-                    track,
-                    isPlaying: autoPlay,
-                    queueIndex: currentIndex,
-                    queueCount: queue.count,
-                    collectionIdentifier: currentCollectionIdentifier
-                )
-                RemoteCommandManager.shared.updateLikeState(isLiked: LikesService.shared.isLiked(trackId: track.id))
-                onTrackStarted?(track)
-                if isWaveMode {
-                    onWaveTrackOutcome?(track, .started)
-                }
-            } else {
-                NowPlayingController.shared.updatePlaybackPosition(currentTime: 0, isPlaying: autoPlay)
-            }
+            notifyTrackStartedMetadata(
+                track,
+                seekSeconds: 0,
+                autoPlay: autoPlay,
+                isInitialTrackStart: isInitialTrackStart
+            )
         }
     }
 
@@ -1042,7 +1440,20 @@ public final class AudioPlayerEngine {
                 guard !Task.isCancelled, self.currentTrack?.id == track.id else { return }
                 self.currentStreamInfo = resolved.downloadInfo
                 self.availableStreamInfos = resolved.allAvailableInfos
-                self.attachPlayerItem(with: resolved.url, for: track, seekTo: interruptedPosition, autoPlay: true, isInitialTrackStart: false)
+                if self.qualitySettings.usesDirectHALBackend && self.currentStreamRetryCount < 2 {
+                    await self.startHALPlayback(
+                        track: track,
+                        seekTo: interruptedPosition,
+                        autoPlay: true,
+                        isInitialTrackStart: false,
+                        offlineRecord: nil,
+                        resolvedStream: resolved
+                    )
+                } else {
+                    self.halPlayer.stopAndRelease()
+                    self.clearHALState()
+                    self.attachPlayerItem(with: resolved.url, for: track, seekTo: interruptedPosition, autoPlay: true, isInitialTrackStart: false)
+                }
             } catch {
                 print("[AudioEngine] Error during stream recovery: \(error)")
                 self.isLoading = false
@@ -1065,54 +1476,72 @@ public final class AudioPlayerEngine {
         let interval = CMTime(seconds: 0.25, preferredTimescale: 600)
         timeObserverToken = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             MainActor.assumeIsolated {
-                guard let self = self, self.isPlaying else { return }
+                guard let self = self, self.isPlaying, !self.isUsingHALForCurrentTrack else { return }
 
                 let currentTime = CMTimeGetSeconds(time)
                 guard !currentTime.isNaN && !currentTime.isInfinite else { return }
 
                 let duration = self.player.currentItem?.duration.seconds ?? 0
                 let validDuration = (!duration.isNaN && !duration.isInfinite && duration > 0) ? duration : (Double(self.currentTrack?.durationMs ?? 0) / 1000.0)
-
-                self.lastObservedPlaybackTime = currentTime
-
-                if self.currentStreamRetryCount > 0 && currentTime > 5.0 && self.player.timeControlStatus == .playing {
-                    self.currentStreamRetryCount = 0
-                }
-
-                if let trackId = self.currentTrack?.id, (self.lastSyncedDurationTrackId != trackId || abs(self.lastSyncedDuration - validDuration) >= 0.5) {
-                    self.lastSyncedDurationTrackId = trackId
-                    self.lastSyncedDuration = validDuration
-                    NowPlayingController.shared.updateDuration(validDuration)
-                }
-
-                // UI Progress Tracker: publish only when the host window is visible and active
-                if self.isHostWindowVisible {
-                    let isLyricsPresented = NavigationCoordinator.shared.isLyricsPresented
-                    if isLyricsPresented || abs(currentTime - self.lastPublishedProgressTime) >= 0.35 {
-                        self.progressTracker.update(currentTime: currentTime, duration: validDuration)
-                        self.lastPublishedProgressTime = currentTime
-                    }
-                }
-
-                let remaining = validDuration - currentTime
-                let crossfadeSec = self.qualitySettings.crossfadeDuration
-                let prefetchLeadTime = max(15.0, crossfadeSec + 6.0)
-
-                // Pre-load next track well ahead of crossfade/track end
-                if validDuration > prefetchLeadTime && remaining <= prefetchLeadTime && !self.hasPrefetchedNextTrack {
-                    self.triggerNextTrackPrefetch()
-                }
-
-                // Trigger dual-player equal-power crossfade when configured and next track is available
-                if crossfadeSec >= 0.5,
-                   !self.isCrossfading,
-                   validDuration > crossfadeSec + 2.0,
-                   remaining <= crossfadeSec,
-                   remaining > 0.25,
-                   self.currentIndex + 1 < self.queue.count {
-                    self.beginCrossfadeToNextTrack(duration: min(crossfadeSec, remaining))
-                }
+                let readyToReset = currentTime > 5.0 && self.player.timeControlStatus == .playing
+                self.handlePeriodicTimeUpdate(
+                    currentTime: currentTime,
+                    duration: validDuration,
+                    allowCrossfade: true,
+                    isReadyToResetRetries: readyToReset
+                )
             }
+        }
+    }
+
+    private func handlePeriodicTimeUpdate(
+        currentTime: Double,
+        duration: Double,
+        allowCrossfade: Bool,
+        isReadyToResetRetries: Bool
+    ) {
+        let validDuration = (duration.isFinite && duration > 0) ? duration : (Double(currentTrack?.durationMs ?? 0) / 1000.0)
+
+        lastObservedPlaybackTime = currentTime
+
+        if currentStreamRetryCount > 0 && isReadyToResetRetries {
+            currentStreamRetryCount = 0
+        }
+
+        if let trackId = currentTrack?.id, (lastSyncedDurationTrackId != trackId || abs(lastSyncedDuration - validDuration) >= 0.5) {
+            lastSyncedDurationTrackId = trackId
+            lastSyncedDuration = validDuration
+            NowPlayingController.shared.updateDuration(validDuration)
+        }
+
+        // UI Progress Tracker: publish only when the host window is visible and active
+        if isHostWindowVisible {
+            let isLyricsPresented = NavigationCoordinator.shared.isLyricsPresented
+            if isLyricsPresented || abs(currentTime - lastPublishedProgressTime) >= 0.35 {
+                progressTracker.update(currentTime: currentTime, duration: validDuration)
+                lastPublishedProgressTime = currentTime
+            }
+        }
+
+        let remaining = validDuration - currentTime
+        let crossfadeSec = qualitySettings.crossfadeDuration
+        let prefetchLeadTime = max(15.0, crossfadeSec + 6.0)
+
+        // Pre-load next track well ahead of crossfade/track end
+        if validDuration > prefetchLeadTime && remaining <= prefetchLeadTime && !hasPrefetchedNextTrack {
+            triggerNextTrackPrefetch()
+        }
+
+        // Trigger dual-player equal-power crossfade only on standard AVPlayer path (disabled in Direct HAL / Hog Mode)
+        if allowCrossfade &&
+           !isUsingHALForCurrentTrack &&
+           crossfadeSec >= 0.5,
+           !isCrossfading,
+           validDuration > crossfadeSec + 2.0,
+           remaining <= crossfadeSec,
+           remaining > 0.25,
+           currentIndex + 1 < queue.count {
+            beginCrossfadeToNextTrack(duration: min(crossfadeSec, remaining))
         }
     }
 
@@ -1288,7 +1717,20 @@ public final class AudioPlayerEngine {
                 guard !Task.isCancelled, self.currentTrack?.id == track.id else { return }
                 self.currentStreamInfo = resolved.downloadInfo
                 self.availableStreamInfos = resolved.allAvailableInfos
-                self.attachPlayerItem(with: resolved.url, for: track, seekTo: interruptedPosition, autoPlay: wasPlaying, isInitialTrackStart: false)
+                if self.qualitySettings.usesDirectHALBackend {
+                    await self.startHALPlayback(
+                        track: track,
+                        seekTo: interruptedPosition,
+                        autoPlay: wasPlaying,
+                        isInitialTrackStart: false,
+                        offlineRecord: nil,
+                        resolvedStream: resolved
+                    )
+                } else {
+                    self.halPlayer.stopAndRelease()
+                    self.clearHALState()
+                    self.attachPlayerItem(with: resolved.url, for: track, seekTo: interruptedPosition, autoPlay: wasPlaying, isInitialTrackStart: false)
+                }
             } catch {
                 print("[AudioEngine] Error switching to stream variant \(info.displayDescription): \(error)")
                 self.isLoading = false
@@ -1313,6 +1755,101 @@ public final class AudioPlayerEngine {
     }
 
     // MARK: - System Lifecycle & Audio Route Integration
+
+    private func setupHALCallbacks() {
+        halPlayer.onTimeUpdate = { [weak self] time, dur in
+            guard let self, self.isUsingHALForCurrentTrack, self.isPlaying else { return }
+            self.handlePeriodicTimeUpdate(
+                currentTime: time,
+                duration: dur,
+                allowCrossfade: false,
+                isReadyToResetRetries: time > 5.0
+            )
+        }
+
+        halPlayer.onTrackFinished = { [weak self] in
+            guard let self, self.isUsingHALForCurrentTrack else { return }
+            self.isPlaying = false
+            self.isExclusiveHogActive = false
+            self.isVolumeBypassedForBitPerfect = false
+            self.handleTrackDidFinish()
+        }
+
+        halPlayer.onPlaybackError = { [weak self] error in
+            guard let self, self.isUsingHALForCurrentTrack else { return }
+            if let apiErr = error as? YMAPIError, case .streamExpired = apiErr {
+                self.clearHALState()
+                self.handleStreamFailure()
+                return
+            }
+
+            let track = self.currentTrack
+            let interruptedPos = self.actualPlaybackTime
+            self.clearHALState()
+            self.halStatusWarning = "Ошибка эксклюзивного вывода (\(error.localizedDescription)) — переключено на стандартный плеер"
+
+            guard let track else {
+                self.isPlaying = false
+                self.isLoading = false
+                return
+            }
+
+            self.isLoading = true
+            self.loadTask?.cancel()
+            self.loadTask = Task { [weak self] in
+                guard let self else { return }
+                do {
+                    let resolved = try await YMNetworkClient.shared.resolveAudioStream(
+                        for: track.id,
+                        preset: self.qualitySettings.preset,
+                        codecPreference: self.qualitySettings.codecPreference,
+                        forceRefresh: false
+                    )
+                    guard !Task.isCancelled, self.currentTrack?.id == track.id else { return }
+                    self.currentStreamInfo = resolved.downloadInfo
+                    self.availableStreamInfos = resolved.allAvailableInfos
+                    self.attachPlayerItem(
+                        with: resolved.url,
+                        for: track,
+                        seekTo: interruptedPos,
+                        autoPlay: true,
+                        isInitialTrackStart: false
+                    )
+                } catch {
+                    self.isLoading = false
+                    self.isPlaying = false
+                }
+            }
+        }
+
+        CoreAudioDeviceManager.shared.onActiveDeviceDisconnected = { [weak self] disconnectedID in
+            guard let self, self.isUsingHALForCurrentTrack else { return }
+            if self.halPlayer.activeMetadata?.deviceSession.deviceID == disconnectedID || self.activeOutputDeviceName != nil {
+                if self.isPlaying {
+                    self.pause()
+                } else {
+                    self.halPlayer.stopAndRelease()
+                }
+                self.isDirectHALActive = false
+                self.isExclusiveHogActive = false
+                self.isVolumeBypassedForBitPerfect = false
+                self.halStatusWarning = "Аудиоустройство отключено — воспроизведение приостановлено"
+            }
+        }
+
+        CoreAudioDeviceManager.shared.onDefaultOutputDeviceChanged = { [weak self] in
+            guard let self,
+                  self.qualitySettings.audioOutputDeviceUID.isEmpty,
+                  self.isUsingHALForCurrentTrack,
+                  self.currentTrack != nil else { return }
+            self.halSettingsReloadTask?.cancel()
+            self.halSettingsReloadTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 180_000_000)
+                guard let self, !Task.isCancelled else { return }
+                self.reloadCurrentTrackStream(forceRefresh: false, forceAutoPlay: self.isPlaying)
+            }
+        }
+    }
 
     private func setupSystemObservers() {
         // macOS Sleep / Wake notifications
@@ -1386,11 +1923,35 @@ public final class AudioPlayerEngine {
                 self?.handleEqualizerEnabledChange()
             }
         }
-        appObservers = [occlusionObs, deminiaturizeObs, unhideObs, eqObs]
+        let halSettingsObs = center.addObserver(
+            forName: .ymAudioOutputSettingsDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.currentTrack != nil else { return }
+                self.halSettingsReloadTask?.cancel()
+                self.halSettingsReloadTask = Task { @MainActor [weak self] in
+                    try? await Task.sleep(nanoseconds: 120_000_000)
+                    guard let self, !Task.isCancelled, self.currentTrack != nil else { return }
+                    self.reloadCurrentTrackStream(forceRefresh: false, forceAutoPlay: self.isPlaying)
+                }
+            }
+        }
+        appObservers = [occlusionObs, deminiaturizeObs, unhideObs, eqObs, halSettingsObs]
     }
 
     private func resyncPlaybackProgressIfNeeded() {
-        guard isPlaying, isHostWindowVisible, let currentItem = player.currentItem else { return }
+        guard isPlaying, isHostWindowVisible else { return }
+        if isUsingHALForCurrentTrack {
+            let currentTime = halPlayer.currentTime
+            let validDuration = halPlayer.duration > 0 ? halPlayer.duration : (Double(currentTrack?.durationMs ?? 0) / 1000.0)
+            guard currentTime.isFinite && currentTime >= 0 else { return }
+            progressTracker.update(currentTime: currentTime, duration: validDuration)
+            lastPublishedProgressTime = currentTime
+            return
+        }
+        guard let currentItem = player.currentItem else { return }
         let currentTime = CMTimeGetSeconds(player.currentTime())
         guard !currentTime.isNaN && !currentTime.isInfinite else { return }
         let duration = currentItem.duration.seconds

@@ -340,6 +340,12 @@ public struct SettingsView: View {
                             Text("Плавно затухает завершающийся трек и вводит следующий по кривой равной мощности (до 12 сек).")
                                 .font(.caption)
                                 .foregroundStyle(YMTheme.fg40)
+
+                            if audioEngine.qualitySettings.exclusiveHogMode {
+                                Text("(отключён при активном эксклюзивном режиме)")
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(.orange)
+                            }
                         }
 
                         Divider()
@@ -360,6 +366,11 @@ public struct SettingsView: View {
                         }
                         .toggleStyle(.checkbox)
                     }
+                }
+
+                // Section 2.5: Bit-Perfect / Exclusive CoreAudio HAL Output
+                settingsCard(title: "Вывод звука и Hi-Res (CoreAudio HAL)") {
+                    ExclusiveAudioSettingsCard()
                 }
 
                 // Section 3: Memory & Cache Optimization Card
@@ -852,6 +863,8 @@ private struct OfflineSettingsCard: View {
     @UIState private var isDeleteConfirmPresented = false
     @UIState private var isClearedFeedback = false
     @UIState private var feedbackTask: Task<Void, Never>? = nil
+    @UIState private var customLimitInput: String = ""
+    @UIState private var customLimitError: String? = nil
 
     private let offlinePresets: [YMAudioQualityPreset] = [.lossless, .high320, .medium192, .standard128]
     private let limitOptions: [(Int, String)] = [
@@ -859,15 +872,53 @@ private struct OfflineSettingsCard: View {
         (5, "5 ГБ (По умолчанию)"),
         (10, "10 ГБ"),
         (20, "20 ГБ"),
+        (-1, "Свой..."),
         (0, "Без лимита")
     ]
 
+    private var selectedMenuTag: Int {
+        qualitySettings.offlineCacheCustomLimitEnabled ? -1 : qualitySettings.offlineCacheLimitGB
+    }
+
+    private var selectedLimitTitle: String {
+        if qualitySettings.offlineCacheCustomLimitEnabled {
+            return "Свой (\(qualitySettings.effectiveOfflineCacheLimitDisplay))"
+        }
+        return limitTitle(qualitySettings.offlineCacheLimitGB)
+    }
+
     private func limitTitle(_ gb: Int) -> String {
         switch gb {
+        case -1: return "Свой..."
         case 0: return "Без лимита"
         case 5: return "5 ГБ (По умолчанию)"
         default: return "\(gb) ГБ"
         }
+    }
+
+    private func syncCustomLimitInputFromSettings() {
+        customLimitInput = Self.plainNumberString(qualitySettings.offlineCacheCustomLimitGB)
+        customLimitError = nil
+    }
+
+    private static func plainNumberString(_ gb: Double) -> String {
+        let normalized = AudioQualitySettings.normalizedCustomCacheLimitGB(gb)
+        let rounded = normalized.rounded()
+        if abs(normalized - rounded) < 0.005 {
+            return "\(Int(rounded))"
+        }
+        return String(format: "%.1f", normalized)
+    }
+
+    private func applyCustomLimitInput() {
+        guard let parsed = AudioQualitySettings.parseCustomCacheLimitGB(customLimitInput) else {
+            customLimitError = "Введите число от 0.1 до 500 ГБ"
+            return
+        }
+        customLimitError = nil
+        qualitySettings.setOfflineCacheCustomLimitGB(parsed)
+        qualitySettings.setOfflineCacheCustomLimitEnabled(true)
+        customLimitInput = Self.plainNumberString(parsed)
     }
 
     private func formatTrackCount(_ count: Int) -> String {
@@ -935,6 +986,62 @@ private struct OfflineSettingsCard: View {
                 }
             }
 
+            if qualitySettings.offlineCacheCustomLimitEnabled {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        Text("Свой лимит:")
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(YMTheme.fg60)
+
+                        TextField("0.1 – 500", text: $customLimitInput)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 13, weight: .medium).monospacedDigit())
+                            .foregroundStyle(YMTheme.fg)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .frame(width: 100)
+                            .background(
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .fill(YMTheme.surfaceComponent)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                            .strokeBorder(customLimitError != nil ? Color.orange.opacity(0.6) : YMTheme.border, lineWidth: 1)
+                                    )
+                            )
+                            .onSubmit {
+                                applyCustomLimitInput()
+                            }
+
+                        Text("ГБ")
+                            .font(.system(size: 12.5, weight: .medium))
+                            .foregroundStyle(YMTheme.fg60)
+
+                        Button("Применить") {
+                            applyCustomLimitInput()
+                        }
+                        .buttonStyle(YMGlassPillButtonStyle(primary: false, height: 28))
+                    }
+
+                    if let customLimitError {
+                        Text(customLimitError)
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    } else {
+                        Text("Допустимо от 0.1 до 500 ГБ (текущий лимит: \(qualitySettings.effectiveOfflineCacheLimitDisplay)).")
+                            .font(.caption)
+                            .foregroundStyle(YMTheme.fg40)
+                    }
+                }
+                .padding(.leading, 2)
+            }
+
+            let activeLimitBytes = qualitySettings.effectiveOfflineCacheLimitBytes
+            if activeLimitBytes > 0 && offlineManager.totalUsedBytes >= activeLimitBytes {
+                Text("Текущий объём кэша достиг выбранного лимита (\(qualitySettings.effectiveOfflineCacheLimitDisplay)) — новые загрузки приостановлены.")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+
             Divider()
                 .overlay(YMTheme.border)
 
@@ -992,6 +1099,9 @@ private struct OfflineSettingsCard: View {
             feedbackTask?.cancel()
             feedbackTask = nil
         }
+        .onAppear {
+            syncCustomLimitInputFromSettings()
+        }
         .task {
             await offlineManager.loadIndexIfNeeded()
         }
@@ -1013,13 +1123,253 @@ private struct OfflineSettingsCard: View {
     @ViewBuilder
     private var limitMenu: some View {
         YMPopupMenu(
-            selectedTitle: limitTitle(qualitySettings.offlineCacheLimitGB),
+            selectedTitle: selectedLimitTitle,
             options: limitOptions,
             selection: Binding(
-                get: { qualitySettings.offlineCacheLimitGB },
-                set: { qualitySettings.setOfflineCacheLimitGB($0) }
+                get: { selectedMenuTag },
+                set: { newValue in
+                    if newValue == -1 {
+                        qualitySettings.setOfflineCacheCustomLimitEnabled(true)
+                        syncCustomLimitInputFromSettings()
+                    } else {
+                        customLimitError = nil
+                        qualitySettings.setOfflineCacheLimitGB(newValue)
+                        qualitySettings.setOfflineCacheCustomLimitEnabled(false)
+                    }
+                }
             ),
             width: 220
+        )
+    }
+}
+
+// MARK: - CoreAudio HAL / Bit-Perfect Output Settings Card
+
+private struct ExclusiveAudioSettingsCard: View {
+    @UIState private var audioEngine = AudioPlayerEngine.shared
+    @UIState private var qualitySettings = AudioQualitySettings.shared
+    @UIState private var deviceManager = CoreAudioDeviceManager.shared
+
+    private var deviceOptions: [(String, String)] {
+        var options: [(String, String)] = [("", "Системное по умолчанию")]
+        for dev in deviceManager.outputDevices {
+            let suffix = dev.isDefaultOutput ? " · по умолчанию" : ""
+            options.append((dev.uid, "\(dev.name) (\(dev.transport.badgeLabel)\(suffix))"))
+        }
+        let currentUID = qualitySettings.audioOutputDeviceUID
+        if !currentUID.isEmpty && !options.contains(where: { $0.0 == currentUID }) {
+            options.append((currentUID, "Выбранное устройство (отключено)"))
+        }
+        return options
+    }
+
+    private var selectedDeviceTitle: String {
+        let currentUID = qualitySettings.audioOutputDeviceUID
+        return deviceOptions.first(where: { $0.0 == currentUID })?.1 ?? "Системное по умолчанию"
+    }
+
+    private var selectedDeviceInfo: AudioOutputDeviceInfo? {
+        if qualitySettings.audioOutputDeviceUID.isEmpty {
+            return deviceManager.outputDevices.first(where: { $0.isDefaultOutput }) ?? deviceManager.outputDevices.first
+        }
+        return deviceManager.outputDevices.first(where: { $0.uid == qualitySettings.audioOutputDeviceUID })
+    }
+
+    private func formatSampleRate(_ hz: Double) -> String {
+        let rounded = Int(hz.rounded())
+        if rounded % 1000 == 0 {
+            return "\(rounded / 1000) кГц"
+        }
+        return String(format: "%.1f кГц", hz / 1000.0)
+    }
+
+    private var currentBackendLabel: String {
+        if audioEngine.isExclusiveHogActive {
+            return audioEngine.isVolumeBypassedForBitPerfect ? "Bit-Perfect (Hog Mode · 0 дБ)" : "Exclusive Hog Mode"
+        }
+        if audioEngine.isDirectHALActive {
+            return "Direct HAL"
+        }
+        return qualitySettings.usesDirectHALBackend ? "CoreAudio HAL (ожидание старта)" : "Стандартный плеер (AVPlayer)"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    Text("Устройство вывода:")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(YMTheme.fg80)
+                        .fixedSize(horizontal: true, vertical: false)
+
+                    deviceSelectorRow
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Устройство вывода:")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(YMTheme.fg80)
+
+                    deviceSelectorRow
+                }
+            }
+
+            Toggle(isOn: Binding(
+                get: { qualitySettings.autoSampleRateSwitching },
+                set: { qualitySettings.setAutoSampleRateSwitching($0) }
+            )) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Автопереключение частоты дискретизации ЦАПа")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(YMTheme.fg)
+                    Text("Подстраивает частоту вывода (44.1 / 48 / 88.2 / 96 / 192 кГц) под каждый трек без системного ресемплинга.")
+                        .font(.caption)
+                        .foregroundStyle(YMTheme.fg40)
+                }
+            }
+            .toggleStyle(.checkbox)
+
+            Toggle(isOn: Binding(
+                get: { qualitySettings.exclusiveHogMode },
+                set: { qualitySettings.setExclusiveHogMode($0) }
+            )) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Эксклюзивный режим захвата (Hog Mode / Bit-Perfect)")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(YMTheme.fg)
+                    Text("Монопольно захватывает аудиоустройство, обходит системный микшер macOS, отключает эквалайзер и кроссфейд.")
+                        .font(.caption)
+                        .foregroundStyle(YMTheme.fg40)
+                }
+            }
+            .toggleStyle(.checkbox)
+
+            if qualitySettings.exclusiveHogMode {
+                Toggle(isOn: Binding(
+                    get: { qualitySettings.bitPerfectFixedVolume },
+                    set: { qualitySettings.setBitPerfectFixedVolume($0) }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Фиксированная громкость 0 дБ (управление на ЦАПе)")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(YMTheme.fg)
+                        Text("Отключает программное масштабирование амплитуды семплов (unity gain 1.0) для побитовой передачи.")
+                            .font(.caption)
+                            .foregroundStyle(YMTheme.fg40)
+                    }
+                }
+                .toggleStyle(.checkbox)
+                .padding(.leading, 22)
+            }
+
+            Divider()
+                .overlay(YMTheme.border)
+
+            // Live device & HAL output status row
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(audioEngine.isExclusiveHogActive ? YMTheme.accent : (audioEngine.isDirectHALActive ? Color.green : YMTheme.fg40))
+                        .frame(width: 8, height: 8)
+
+                    Text("Режим: \(currentBackendLabel)")
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .foregroundStyle(YMTheme.fg)
+
+                    Spacer()
+
+                    if let rate = audioEngine.activeDeviceSampleRate ?? selectedDeviceInfo?.nominalSampleRate {
+                        Text(formatSampleRate(rate))
+                            .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                            .foregroundStyle(YMTheme.accent)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(YMTheme.accent.opacity(0.14)))
+                    }
+                }
+
+                if let activeName = audioEngine.activeOutputDeviceName ?? selectedDeviceInfo?.name {
+                    Text("Активное устройство: \(activeName)")
+                        .font(.caption)
+                        .foregroundStyle(YMTheme.fg60)
+                }
+
+                if let details = audioEngine.currentAudioFormatDetails {
+                    Text("Сигнал: \(details)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(YMTheme.fg60)
+                }
+            }
+
+            if let warning = audioEngine.halStatusWarning, !warning.isEmpty {
+                halWarningBanner(warning)
+            } else if let dev = selectedDeviceInfo,
+                      !dev.transport.supportsExclusiveMode,
+                      (qualitySettings.exclusiveHogMode || qualitySettings.autoSampleRateSwitching) {
+                halWarningBanner("Устройство \(dev.name) (\(dev.transport.badgeLabel)) не поддерживает эксклюзивный захват — будет использоваться прямой вывод без Hog Mode.")
+            }
+        }
+        .onAppear {
+            deviceManager.refreshDevices()
+        }
+    }
+
+    @ViewBuilder
+    private var deviceSelectorRow: some View {
+        HStack(spacing: 8) {
+            YMPopupMenu(
+                selectedTitle: selectedDeviceTitle,
+                options: deviceOptions,
+                selection: Binding(
+                    get: { qualitySettings.audioOutputDeviceUID },
+                    set: { qualitySettings.setAudioOutputDeviceUID($0) }
+                ),
+                width: 280
+            )
+
+            Button {
+                deviceManager.refreshDevices()
+            } label: {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(YMTheme.fg80)
+                    .frame(width: 28, height: 28)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(YMTheme.surfaceComponent)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .strokeBorder(YMTheme.border, lineWidth: 1)
+                            )
+                    )
+            }
+            .buttonStyle(.plain)
+            .help("Обновить список аудиоустройств")
+        }
+    }
+
+    @ViewBuilder
+    private func halWarningBanner(_ text: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 12))
+                .foregroundStyle(.orange)
+                .padding(.top, 1)
+
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.orange.opacity(0.10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(Color.orange.opacity(0.30), lineWidth: 1)
+                )
         )
     }
 }
