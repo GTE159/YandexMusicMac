@@ -36,16 +36,23 @@ public final class AudioPlayerEngine {
 
     public var isSubscriptionRequiredPresented: Bool = false
 
-    /// Checks whether the user has a valid subscription to stream audio.
+    /// Checks whether the user has a valid subscription to stream or play offline audio.
     /// Returns true if playback can proceed, or false (triggering modal) if blocked.
     @discardableResult
     public func checkSubscriptionEligibility() -> Bool {
-        if AuthService.shared.isAuthenticated,
-           let user = AuthService.shared.currentUser,
-           !user.hasActiveSubscription {
-            self.stopAndClear()
-            self.isSubscriptionRequiredPresented = true
-            return false
+        if AuthService.shared.isAuthenticated {
+            if let user = AuthService.shared.currentUser {
+                if !user.hasActiveSubscription {
+                    self.stopAndClear()
+                    self.isSubscriptionRequiredPresented = true
+                    return false
+                }
+            } else if let ent = AuthService.shared.cachedEntitlement,
+                      (!ent.hasActiveSubscription || Date() >= ent.validUntil) {
+                self.stopAndClear()
+                self.isSubscriptionRequiredPresented = true
+                return false
+            }
         }
         return true
     }
@@ -97,6 +104,7 @@ public final class AudioPlayerEngine {
     public var onTrackFinished: (@Sendable (YMTrack, Double) -> Void)?
     public var onTrackSkipped: (@Sendable (YMTrack, Double) -> Void)?
     public var onQueueNeedsMoreTracks: (@Sendable () -> Void)?
+    public var onWaveTrackOutcome: (@MainActor (YMTrack, YMWaveTrackOutcome) -> Void)?
 
     // MARK: - Internal Player Resources & Crossfade Engine
 
@@ -132,6 +140,9 @@ public final class AudioPlayerEngine {
     @ObservationIgnored private var failedItemsHandled: Set<ObjectIdentifier> = []
     @ObservationIgnored private var currentStreamRetryCount = 0
     @ObservationIgnored private let maxStreamRetries = 2
+    @ObservationIgnored private var activeOfflineLoaderDelegate: OfflineAssetResourceLoaderDelegate?
+    @ObservationIgnored private var outgoingOfflineLoaderDelegate: OfflineAssetResourceLoaderDelegate?
+    @ObservationIgnored private var isCurrentItemOffline: Bool = false
 
     // Track played seconds for Rotor telemetry
     @ObservationIgnored private var trackStartTimestamp: Date = Date()
@@ -176,6 +187,9 @@ public final class AudioPlayerEngine {
 
     public func cleanup() {
         cancelCrossfade(stopOutgoing: true)
+        activeOfflineLoaderDelegate?.invalidate()
+        activeOfflineLoaderDelegate = nil
+        isCurrentItemOffline = false
         loadTask?.cancel()
         loadTask = nil
         prefetchTask?.cancel()
@@ -205,10 +219,14 @@ public final class AudioPlayerEngine {
         outgoingFadeGain = 0.0
         applyEffectiveVolumes()
 
-        if stopOutgoing, let outgoing = outgoingPlayer {
-            outgoing.pause()
-            outgoing.replaceCurrentItem(with: nil)
-            outgoingPlayer = nil
+        if stopOutgoing {
+            if let outgoing = outgoingPlayer {
+                outgoing.pause()
+                outgoing.replaceCurrentItem(with: nil)
+                outgoingPlayer = nil
+            }
+            outgoingOfflineLoaderDelegate?.invalidate()
+            outgoingOfflineLoaderDelegate = nil
         }
     }
 
@@ -386,6 +404,9 @@ public final class AudioPlayerEngine {
             recordPlaybackSession()
             if !suppressNextSkipTelemetry {
                 onTrackSkipped?(current, accumulatedPlayedSeconds)
+                if isWaveMode {
+                    onWaveTrackOutcome?(current, .skipped(playedSeconds: accumulatedPlayedSeconds))
+                }
             }
         }
         suppressNextSkipTelemetry = false
@@ -448,6 +469,9 @@ public final class AudioPlayerEngine {
 
     public func stopAndClear() {
         cancelCrossfade(stopOutgoing: true)
+        activeOfflineLoaderDelegate?.invalidate()
+        activeOfflineLoaderDelegate = nil
+        isCurrentItemOffline = false
         loadTask?.cancel()
         loadTask = nil
         prefetchTask?.cancel()
@@ -622,11 +646,13 @@ public final class AudioPlayerEngine {
         guard isWaveMode, let track = targetTrack ?? currentTrack else { return }
         switch signal {
         case .moreLikeThis:
+            onWaveTrackOutcome?(track, .moreLikeThis)
             self.trimUpcomingWaveQueue(keepNextCount: 1)
             Task {
                 try? await RotorService.shared.sendAlgorithmicMoreLikeThis(track: track)
             }
         case .lessLikeThis:
+            onWaveTrackOutcome?(track, .lessLikeThis)
             let isCurrent = (track.id == currentTrack?.id)
             let played = isCurrent ? actualPlaybackTime : 0
             if isCurrent {
@@ -660,6 +686,43 @@ public final class AudioPlayerEngine {
 
         loadTask = Task { [weak self] in
             guard let self = self else { return }
+
+            let cleanTrackId = OfflineTrackID.clean(track.id)
+            if !forceRefresh,
+               let uid = AuthService.shared.currentUser?.userId ?? KeychainManager.shared.getUserId(),
+               let offlineRecord = await OfflineStorageStore.shared.record(for: cleanTrackId, ownerUid: uid) {
+                let fileURL = await OfflineStorageStore.shared.audioFileURL(for: offlineRecord)
+                if FileManager.default.fileExists(atPath: fileURL.path),
+                   let built = OfflineAssetResourceLoaderDelegate.makeAsset(
+                       fileURL: fileURL,
+                       trackId: offlineRecord.id,
+                       codec: offlineRecord.codec,
+                       key: OfflineCrypto.audioKey
+                   ) {
+                    guard !Task.isCancelled, self.currentTrack?.id == track.id else {
+                        built.delegate.invalidate()
+                        return
+                    }
+                    let syntheticInfo = YMDownloadInfo(
+                        codec: offlineRecord.codec,
+                        bitrateInKbps: offlineRecord.bitrateInKbps,
+                        downloadInfoUrl: built.asset.url,
+                        direct: true,
+                        lossless: offlineRecord.isLossless
+                    )
+                    self.currentStreamInfo = syntheticInfo
+                    self.availableStreamInfos = [syntheticInfo]
+                    self.attachPreparedAsset(
+                        built.asset,
+                        offlineDelegate: built.delegate,
+                        for: track,
+                        seekTo: seekSeconds,
+                        autoPlay: autoPlay,
+                        isInitialTrackStart: isInitialTrackStart
+                    )
+                    return
+                }
+            }
 
             var resolvedStream: YMNetworkClient.YMResolvedAudioStream?
 
@@ -698,11 +761,6 @@ public final class AudioPlayerEngine {
     }
 
     private func attachPlayerItem(with url: URL, for track: YMTrack, seekTo seekSeconds: Double?, autoPlay: Bool = true, isInitialTrackStart: Bool = true) {
-        detachItemObservers()
-        self.currentAudioFormatDetails = nil
-        self.currentStreamFetchedAt = Date()
-        self.failedItemsHandled.removeAll()
-
         var assetOptions: [String: Any] = [:]
         if let codec = currentStreamInfo?.codec.lowercased() {
             if codec == "flac" {
@@ -713,6 +771,35 @@ public final class AudioPlayerEngine {
         }
 
         let asset = AVURLAsset(url: url, options: assetOptions.isEmpty ? nil : assetOptions)
+        attachPreparedAsset(
+            asset,
+            offlineDelegate: nil,
+            for: track,
+            seekTo: seekSeconds,
+            autoPlay: autoPlay,
+            isInitialTrackStart: isInitialTrackStart
+        )
+    }
+
+    private func attachPreparedAsset(
+        _ asset: AVURLAsset,
+        offlineDelegate: OfflineAssetResourceLoaderDelegate?,
+        for track: YMTrack,
+        seekTo seekSeconds: Double?,
+        autoPlay: Bool = true,
+        isInitialTrackStart: Bool = true
+    ) {
+        detachItemObservers()
+        if let previousDelegate = activeOfflineLoaderDelegate, previousDelegate !== offlineDelegate {
+            previousDelegate.invalidate()
+        }
+        activeOfflineLoaderDelegate = offlineDelegate
+        isCurrentItemOffline = (offlineDelegate != nil)
+
+        self.currentAudioFormatDetails = nil
+        self.currentStreamFetchedAt = Date()
+        self.failedItemsHandled.removeAll()
+
         let item = AVPlayerItem(asset: asset)
 
         self.updateAudioFormatDetails(for: item)
@@ -814,6 +901,9 @@ public final class AudioPlayerEngine {
                         )
                         RemoteCommandManager.shared.updateLikeState(isLiked: LikesService.shared.isLiked(trackId: track.id))
                         self.onTrackStarted?(track)
+                        if self.isWaveMode {
+                            self.onWaveTrackOutcome?(track, .started)
+                        }
                     } else {
                         NowPlayingController.shared.updatePlaybackPosition(currentTime: seekSeconds, isPlaying: autoPlay)
                     }
@@ -838,6 +928,9 @@ public final class AudioPlayerEngine {
                 )
                 RemoteCommandManager.shared.updateLikeState(isLiked: LikesService.shared.isLiked(trackId: track.id))
                 onTrackStarted?(track)
+                if isWaveMode {
+                    onWaveTrackOutcome?(track, .started)
+                }
             } else {
                 NowPlayingController.shared.updatePlaybackPosition(currentTime: 0, isPlaying: autoPlay)
             }
@@ -891,6 +984,10 @@ public final class AudioPlayerEngine {
         guard let track = currentTrack else { return }
         recordPlaybackSession()
         onTrackFinished?(track, accumulatedPlayedSeconds)
+        if isWaveMode {
+            onWaveTrackOutcome?(track, .finished(playedSeconds: accumulatedPlayedSeconds))
+        }
+        suppressNextSkipTelemetry = true
         next()
     }
 
@@ -905,6 +1002,18 @@ public final class AudioPlayerEngine {
             print("[AudioEngine] Max stream retry count reached or no current track.")
             isLoading = false
             isPlaying = false
+            return
+        }
+
+        if isCurrentItemOffline {
+            isCurrentItemOffline = false
+            activeOfflineLoaderDelegate?.invalidate()
+            activeOfflineLoaderDelegate = nil
+            cancelCrossfade(stopOutgoing: true)
+            currentStreamRetryCount += 1
+            let interruptedPosition = actualPlaybackTime
+            print("[AudioEngine] Offline stream failed at \(interruptedPosition)s. Falling back to online stream...")
+            loadAndPlay(track: track, seekTo: interruptedPosition, autoPlay: true, forceRefresh: true, isInitialTrackStart: false)
             return
         }
 
@@ -1015,6 +1124,9 @@ public final class AudioPlayerEngine {
         if let finishingTrack = currentTrack {
             recordPlaybackSession()
             onTrackFinished?(finishingTrack, accumulatedPlayedSeconds)
+            if isWaveMode {
+                onWaveTrackOutcome?(finishingTrack, .finished(playedSeconds: accumulatedPlayedSeconds))
+            }
         }
 
         // Release any previous outgoing player before swapping
@@ -1023,6 +1135,10 @@ public final class AudioPlayerEngine {
             staleOutgoing.replaceCurrentItem(with: nil)
             outgoingPlayer = nil
         }
+        outgoingOfflineLoaderDelegate?.invalidate()
+        outgoingOfflineLoaderDelegate = activeOfflineLoaderDelegate
+        activeOfflineLoaderDelegate = nil
+        isCurrentItemOffline = false
 
         // Detach observers and time observer from the outgoing player WITHOUT cancelling its remaining buffer
         if let token = timeObserverToken {
@@ -1114,6 +1230,9 @@ public final class AudioPlayerEngine {
         }
 
         let nextTrack = queue[nextIndex]
+        if OfflineDownloadManager.shared.isDownloaded(trackId: nextTrack.id) {
+            return
+        }
         prefetchTask?.cancel()
         let preset = qualitySettings.preset
         let codec = qualitySettings.codecPreference
@@ -1221,7 +1340,7 @@ public final class AudioPlayerEngine {
                 guard let self = self else { return }
                 if self.wasPlayingBeforeSleep {
                     let sleepDuration = self.sleepTimestamp.map { Date().timeIntervalSince($0) } ?? 0
-                    if sleepDuration > 120 && self.currentTrack != nil {
+                    if sleepDuration > 120 && self.currentTrack != nil && !self.isCurrentItemOffline {
                         self.reloadCurrentTrackStream(forceRefresh: true, forceAutoPlay: true)
                     } else {
                         self.play()

@@ -507,7 +507,10 @@ private struct ChartTrackRow: View {
 
     @ViewBuilder
     private var likeButtonView: some View {
-        YMLikeHeartButton(track: track, buttonWidth: isMiniWidth ? 28 : 32)
+        HStack(spacing: 4) {
+            YMTrackOfflineBadge(trackId: track.id)
+            YMLikeHeartButton(track: track, buttonWidth: isMiniWidth ? 28 : 32)
+        }
     }
 
     @ViewBuilder
@@ -548,6 +551,7 @@ private struct ChartTrackRow: View {
         }
         Divider()
         AddToPlaylistContextMenu(track: track)
+        OfflineDownloadContextMenuItem(track: track)
         LikeContextMenuItem(track: track)
     }
 

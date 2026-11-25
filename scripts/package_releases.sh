@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${PROJECT_ROOT}"
 
-VERSION="${1:-2.1.0}"
+VERSION="${1:-2.2}"
 export APP_VERSION="$VERSION"
 DIST_DIR="${PROJECT_ROOT}/dist"
 rm -rf "$DIST_DIR"

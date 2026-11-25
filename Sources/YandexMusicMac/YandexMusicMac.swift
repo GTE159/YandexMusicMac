@@ -366,6 +366,11 @@ struct YandexMusicMacApp: App {
                 }
                 .keyboardShortcut("4", modifiers: [.command])
 
+                Button("Скачанное") {
+                    NavigationCoordinator.shared.selectSection(.downloads)
+                }
+                .keyboardShortcut("5", modifiers: [.command])
+
                 Button("Настройки") {
                     NavigationCoordinator.shared.selectSection(.settings)
                 }

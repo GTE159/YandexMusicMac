@@ -11,14 +11,32 @@ public final class AuthService {
     public private(set) var isAuthenticated: Bool = false
     public private(set) var isAuthenticating: Bool = false
     public private(set) var currentUser: YMAccountStatus?
+    public private(set) var cachedEntitlement: OfflineEntitlementSnapshot? = nil
+    public private(set) var deviceAuthState: YMDeviceAuthState = .idle
     public var errorMessage: String? = nil
+
+    public var hasOfflinePlusEntitlement: Bool {
+        if let user = currentUser {
+            return user.hasActiveSubscription
+        }
+        if isAuthenticated,
+           let ent = cachedEntitlement,
+           ent.hasActiveSubscription,
+           Date() < ent.validUntil {
+            return true
+        }
+        return false
+    }
 
     private let keychain: KeychainManager
     private let networkClient: YMNetworkClient
+    @ObservationIgnored private let deviceAuthClient: YMDeviceAuthClient
 
     @ObservationIgnored private var sessionGeneration: UInt64 = 0
     @ObservationIgnored private var validationTask: Task<Void, Never>?
     @ObservationIgnored private var signOutTask: Task<Void, Never>?
+    @ObservationIgnored private var deviceAuthTask: Task<Void, Never>?
+    @ObservationIgnored private var deviceAuthGeneration: UInt64 = 0
 
     /// Official Yandex Music OAuth Client ID
     public static let oauthClientID = "23cabbbdc6cd418abb4b39c32c41195d"
@@ -26,13 +44,53 @@ public final class AuthService {
     /// Strict canonical OAuth authorization URL specified for Yandex Music
     public static let oauthURLString = "https://oauth.yandex.ru/authorize?response_type=token&client_id=\(oauthClientID)"
 
-    public init(keychain: KeychainManager = .shared, networkClient: YMNetworkClient = .shared) {
+    /// Minimal OAuth scopes required strictly for Yandex Music playback, library, and likes/playlists
+    public static let minimalOAuthScope = YMDeviceAuthClient.minimalMusicScopes
+
+    private static let deviceIdDefaultsKey = "ym_oauth_device_id"
+
+    public static func oauthAuthorizeURL(minimalScope: Bool = true, forceConfirm: Bool = true) -> URL? {
+        var components = URLComponents(string: "https://oauth.yandex.ru/authorize")
+        var items: [URLQueryItem] = [
+            URLQueryItem(name: "response_type", value: "token"),
+            URLQueryItem(name: "client_id", value: oauthClientID)
+        ]
+        if minimalScope {
+            items.append(URLQueryItem(name: "scope", value: minimalOAuthScope))
+        }
+        if forceConfirm {
+            items.append(URLQueryItem(name: "force_confirm", value: "yes"))
+        }
+        components?.queryItems = items
+        return components?.url
+    }
+
+    public init(
+        keychain: KeychainManager = .shared,
+        networkClient: YMNetworkClient = .shared,
+        deviceAuthClient: YMDeviceAuthClient = YMDeviceAuthClient()
+    ) {
         self.keychain = keychain
         self.networkClient = networkClient
+        self.deviceAuthClient = deviceAuthClient
         if let savedToken = keychain.getToken(), !savedToken.isEmpty {
             self.isAuthenticated = true
             let gen = self.sessionGeneration
+            let savedUid = keychain.getUserId()
+            if let uid = savedUid, !uid.isEmpty {
+                SavedWavePresetStore.shared.loadIfNeeded(for: uid)
+            }
             self.validationTask = Task { [weak self] in
+                if let uid = savedUid, !uid.isEmpty {
+                    let snapshot = await OfflineStorageStore.shared.loadEntitlement(for: uid)
+                    await MainActor.run { [weak self] in
+                        guard let self, self.sessionGeneration == gen else { return }
+                        if self.cachedEntitlement == nil {
+                            self.cachedEntitlement = snapshot
+                        }
+                    }
+                }
+                await OfflineDownloadManager.shared.loadIndexIfNeeded()
                 await self?.validateSavedSession(expectedGeneration: gen)
             }
         }
@@ -98,8 +156,145 @@ public final class AuthService {
 
     /// Opens the strict OAuth link in the user's default browser (Safari/Chrome) with explicit account confirmation
     public func openOAuthInBrowser() {
-        guard let url = URL(string: "\(Self.oauthURLString)&force_confirm=yes") else { return }
+        guard let url = Self.oauthAuthorizeURL(minimalScope: true, forceConfirm: true) else { return }
         NSWorkspace.shared.open(url)
+    }
+
+    // MARK: - Device Flow Authorization ("Вход как устройство")
+
+    func stableDeviceId() -> String {
+        if let existing = UserDefaults.standard.string(forKey: Self.deviceIdDefaultsKey),
+           existing.count >= 10 {
+            return existing
+        }
+        let alphabet = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")
+        var rng = SystemRandomNumberGenerator()
+        var generated = String()
+        generated.reserveCapacity(16)
+        for _ in 0..<16 {
+            let idx = Int.random(in: 0..<alphabet.count, using: &rng)
+            generated.append(alphabet[idx])
+        }
+        UserDefaults.standard.set(generated, forKey: Self.deviceIdDefaultsKey)
+        return generated
+    }
+
+    func deviceDisplayName() -> String {
+        let hostName = Host.current().localizedName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let hostName, !hostName.isEmpty {
+            return "flow~ (\(String(hostName.prefix(32))))"
+        }
+        return "flow~ (Mac)"
+    }
+
+    public func startDeviceAuth(preferMinimalScope: Bool = true) {
+        deviceAuthTask?.cancel()
+        deviceAuthTask = nil
+        deviceAuthGeneration &+= 1
+        let gen = deviceAuthGeneration
+
+        self.errorMessage = nil
+        self.deviceAuthState = .requestingCode
+
+        let deviceId = stableDeviceId()
+        let deviceName = deviceDisplayName()
+
+        deviceAuthTask = Task { [weak self, deviceAuthClient] in
+            guard let self else { return }
+
+            let code: YMDeviceCodeResponse
+            do {
+                code = try await deviceAuthClient.requestDeviceCode(
+                    deviceId: deviceId,
+                    deviceName: deviceName,
+                    preferMinimalScope: preferMinimalScope
+                )
+            } catch is CancellationError {
+                return
+            } catch {
+                guard !Task.isCancelled, self.deviceAuthGeneration == gen else { return }
+                self.deviceAuthState = .failed(error.localizedDescription)
+                return
+            }
+
+            guard !Task.isCancelled, self.deviceAuthGeneration == gen else { return }
+            let expiresAt = Date().addingTimeInterval(TimeInterval(code.expiresIn))
+            self.deviceAuthState = .awaitingConfirmation(code: code, expiresAt: expiresAt)
+
+            var pollInterval = TimeInterval(code.interval)
+            var consecutiveNetworkErrors = 0
+
+            while !Task.isCancelled && self.deviceAuthGeneration == gen {
+                if Date() >= expiresAt {
+                    self.deviceAuthState = .expired
+                    return
+                }
+
+                do {
+                    try await Task.sleep(nanoseconds: UInt64(pollInterval * 1_000_000_000))
+                } catch {
+                    return
+                }
+
+                guard !Task.isCancelled, self.deviceAuthGeneration == gen else { return }
+
+                do {
+                    let result = try await deviceAuthClient.pollDeviceToken(deviceCode: code.deviceCode)
+                    guard !Task.isCancelled, self.deviceAuthGeneration == gen else { return }
+
+                    switch result {
+                    case .pending:
+                        consecutiveNetworkErrors = 0
+                    case .slowDown:
+                        consecutiveNetworkErrors = 0
+                        pollInterval = min(pollInterval + 5.0, 20.0)
+                    case .expired:
+                        self.deviceAuthState = .expired
+                        return
+                    case .denied:
+                        self.deviceAuthState = .failed(YMDeviceAuthError.accessDenied.localizedDescription)
+                        return
+                    case .authorized(let tokenResponse):
+                        self.deviceAuthState = .verifyingToken
+                        await self.performValidateAndSaveToken(tokenResponse.accessToken, cancelDeviceFlow: false)
+                        guard !Task.isCancelled, self.deviceAuthGeneration == gen else { return }
+                        if self.isAuthenticated {
+                            self.deviceAuthState = .idle
+                        } else {
+                            self.deviceAuthState = .failed(self.errorMessage ?? "Не удалось проверить токен")
+                        }
+                        return
+                    }
+                } catch is CancellationError {
+                    return
+                } catch let authError as YMDeviceAuthError {
+                    guard !Task.isCancelled, self.deviceAuthGeneration == gen else { return }
+                    if case .networkError = authError {
+                        consecutiveNetworkErrors += 1
+                        if consecutiveNetworkErrors > 3 {
+                            self.deviceAuthState = .failed(authError.localizedDescription)
+                            return
+                        }
+                    } else {
+                        self.deviceAuthState = .failed(authError.localizedDescription)
+                        return
+                    }
+                } catch {
+                    guard !Task.isCancelled, self.deviceAuthGeneration == gen else { return }
+                    self.deviceAuthState = .failed(error.localizedDescription)
+                    return
+                }
+            }
+        }
+    }
+
+    public func cancelDeviceAuth() {
+        deviceAuthGeneration &+= 1
+        deviceAuthTask?.cancel()
+        deviceAuthTask = nil
+        if deviceAuthState != .idle {
+            deviceAuthState = .idle
+        }
     }
 
     // MARK: - Method 2: Manual Token Submission
@@ -110,12 +305,20 @@ public final class AuthService {
             self.errorMessage = "Некорректный формат токена. Вставьте OAuth-токен (например, y0_AgAAA...) или полную ссылку с #access_token=..."
             return
         }
+        cancelDeviceAuth()
         await validateAndSaveToken(cleanToken)
     }
 
     // MARK: - Token Validation & Keychain Persistence
 
     public func validateAndSaveToken(_ token: String) async {
+        await performValidateAndSaveToken(token, cancelDeviceFlow: true)
+    }
+
+    private func performValidateAndSaveToken(_ token: String, cancelDeviceFlow: Bool) async {
+        if cancelDeviceFlow {
+            cancelDeviceAuth()
+        }
         validationTask?.cancel()
         validationTask = nil
         signOutTask?.cancel()
@@ -150,6 +353,11 @@ public final class AuthService {
             }
             if let uid = status.userId {
                 try? keychain.saveUserId(uid)
+                let snapshot = OfflineEntitlementSnapshot(from: status, userId: uid)
+                self.cachedEntitlement = snapshot
+                try? await OfflineStorageStore.shared.saveEntitlement(snapshot)
+                await OfflineDownloadManager.shared.loadIndexIfNeeded()
+                SavedWavePresetStore.shared.loadIfNeeded(for: uid)
                 try? await LikesService.shared.syncLikes(uid: uid)
             }
 
@@ -202,12 +410,18 @@ public final class AuthService {
 
             self.currentUser = status
             self.isAuthenticated = true
-            AudioPlayerEngine.shared.checkSubscriptionEligibility()
 
             if let uid = status.userId {
                 try? keychain.saveUserId(uid)
+                let snapshot = OfflineEntitlementSnapshot(from: status, userId: uid)
+                self.cachedEntitlement = snapshot
+                try? await OfflineStorageStore.shared.saveEntitlement(snapshot)
+                await OfflineDownloadManager.shared.loadIndexIfNeeded()
+                SavedWavePresetStore.shared.loadIfNeeded(for: uid)
                 try? await LikesService.shared.syncLikes(uid: uid)
             }
+
+            AudioPlayerEngine.shared.checkSubscriptionEligibility()
         } catch let apiError as YMAPIError {
             guard !Task.isCancelled, self.sessionGeneration == expectedGeneration else { return }
             if case .unauthorized = apiError {
@@ -225,6 +439,7 @@ public final class AuthService {
     }
 
     public func signOut() {
+        cancelDeviceAuth()
         sessionGeneration &+= 1
         let generation = sessionGeneration
 
@@ -237,10 +452,15 @@ public final class AuthService {
         NowPlayingController.shared.clearNowPlaying()
         LikesService.shared.resetAll()
         PlaylistsService.shared.resetAll()
+        OfflineDownloadManager.shared.resetForSignOut()
+        SavedWavePresetStore.shared.resetInMemory()
+        WaveSessionController.shared.clearActiveSavedWave()
+        self.cachedEntitlement = nil
 
         try? keychain.clearAll()
 
         signOutTask = Task { [weak self, networkClient] in
+            await OfflineStorageStore.shared.clearEntitlement()
             await RotorService.shared.resetSession()
             guard let self = self else { return }
             let stillMatches = await MainActor.run {

@@ -369,6 +369,7 @@ public struct PlaylistsView: View {
                                 playlistPlayButton(title: "Слушать всё", height: 34)
                                 playlistShuffleButton(title: "Перемешать", height: 34)
                                 playlistWaveButton(playlist: playlist, title: "Волна по плейлисту", height: 34)
+                                BatchDownloadButton(tracks: playlistTracks, height: 34, compact: false)
                                 playlistEditButton(playlist: playlist, height: 34)
                                 playlistDeleteButton(playlist: playlist, height: 34)
                             }
@@ -377,6 +378,7 @@ public struct PlaylistsView: View {
                                 playlistPlayButton(title: "Слушать", height: 30)
                                 playlistShuffleButton(title: "Микс", height: 30)
                                 playlistWaveButton(playlist: playlist, title: "Волна", height: 30)
+                                BatchDownloadButton(tracks: playlistTracks, height: 30, compact: true)
                                 playlistEditButton(playlist: playlist, height: 30)
                                 playlistDeleteButton(playlist: playlist, height: 30)
                             }
@@ -385,6 +387,7 @@ public struct PlaylistsView: View {
                                 HStack(spacing: 8) {
                                     playlistPlayButton(title: "Слушать", height: 30)
                                     playlistShuffleButton(title: "Микс", height: 30)
+                                    BatchDownloadButton(tracks: playlistTracks, height: 30, compact: true)
                                     playlistEditButton(playlist: playlist, height: 30)
                                     playlistDeleteButton(playlist: playlist, height: 30)
                                 }

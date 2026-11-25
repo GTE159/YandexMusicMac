@@ -12,6 +12,8 @@ public final class AudioQualitySettings {
     private let preloadFavoritesKey = "ym_preload_favorites_bg"
     private let imageCacheLimitKey = "ym_image_cache_limit_mb"
     private let crossfadeDurationKey = "ym_audio_crossfade_seconds"
+    private let offlinePresetKey = "ym_offline_quality_preset"
+    private let offlineCacheLimitKey = "ym_offline_cache_limit_gb"
 
     public var preset: YMAudioQualityPreset {
         didSet {
@@ -57,6 +59,26 @@ public final class AudioQualitySettings {
         }
     }
 
+    /// Preferred audio quality preset when downloading tracks for offline playback (default `.high320`)
+    public var offlineQualityPreset: YMAudioQualityPreset {
+        didSet {
+            UserDefaults.standard.set(offlineQualityPreset.rawValue, forKey: offlinePresetKey)
+        }
+    }
+
+    /// Maximum disk quota for offline downloaded tracks in GB (`0` = unlimited, default `5`)
+    public var offlineCacheLimitGB: Int {
+        didSet {
+            let allowed: Set<Int> = [0, 2, 5, 10, 20]
+            let resolved = allowed.contains(offlineCacheLimitGB) ? offlineCacheLimitGB : 5
+            if offlineCacheLimitGB != resolved {
+                offlineCacheLimitGB = resolved
+                return
+            }
+            UserDefaults.standard.set(resolved, forKey: offlineCacheLimitKey)
+        }
+    }
+
     public init() {
         let savedPresetStr = UserDefaults.standard.string(forKey: presetKey)
         let resolvedPreset = savedPresetStr.flatMap(YMAudioQualityPreset.init(rawValue:)) ?? .high320
@@ -71,11 +93,25 @@ public final class AudioQualitySettings {
         let savedCrossfade = UserDefaults.standard.double(forKey: crossfadeDurationKey)
         let resolvedCrossfade = max(0.0, min(12.0, savedCrossfade))
 
+        let savedOfflinePresetStr = UserDefaults.standard.string(forKey: offlinePresetKey)
+        let resolvedOfflinePreset = savedOfflinePresetStr.flatMap(YMAudioQualityPreset.init(rawValue:)) ?? .high320
+
+        let allowedLimits: Set<Int> = [0, 2, 5, 10, 20]
+        let resolvedOfflineLimit: Int
+        if UserDefaults.standard.object(forKey: offlineCacheLimitKey) != nil {
+            let savedOfflineLimit = UserDefaults.standard.integer(forKey: offlineCacheLimitKey)
+            resolvedOfflineLimit = allowedLimits.contains(savedOfflineLimit) ? savedOfflineLimit : 5
+        } else {
+            resolvedOfflineLimit = 5
+        }
+
         self.preset = resolvedPreset
         self.codecPreference = resolvedCodec
         self.preloadAllFavoritesInBackground = savedPreload
         self.imageCacheLimitMB = resolvedImageLimit
         self.crossfadeDuration = resolvedCrossfade
+        self.offlineQualityPreset = resolvedOfflinePreset
+        self.offlineCacheLimitGB = resolvedOfflineLimit
 
         ImagePipeline.shared.setMaxMemoryCost(mb: resolvedImageLimit)
     }
@@ -98,6 +134,14 @@ public final class AudioQualitySettings {
 
     public func setCrossfadeDuration(_ seconds: Double) {
         self.crossfadeDuration = max(0.0, min(12.0, seconds))
+    }
+
+    public func setOfflineQualityPreset(_ newPreset: YMAudioQualityPreset) {
+        self.offlineQualityPreset = newPreset
+    }
+
+    public func setOfflineCacheLimitGB(_ limitGB: Int) {
+        self.offlineCacheLimitGB = limitGB
     }
 
     /// Drops unnecessary cached data, trims search buffer and clears image/network caches to drop RAM to 40-50 MB

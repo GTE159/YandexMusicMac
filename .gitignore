@@ -25,8 +25,9 @@ Icon?
 ym_network_cache/
 project_dump*.txt
 repomix-output.xml
+pack-*.md
 *.swp
 *~
 *.zip
 dist/
-arm/
+arm*/

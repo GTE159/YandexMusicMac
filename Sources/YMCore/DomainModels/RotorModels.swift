@@ -675,7 +675,7 @@ public struct YMRotorFeedbackEvent: Codable, Sendable {
 
 // MARK: - Wave Vibe & Context Models
 
-public enum YMWaveVibePreset: String, CaseIterable, Identifiable, Sendable {
+public enum YMWaveVibePreset: String, CaseIterable, Identifiable, Codable, Sendable {
     case defaultWave = "default"
     case energetic = "energetic"
     case unfamiliar = "discover"
@@ -870,6 +870,58 @@ public struct YMWaveContext: Equatable, Sendable {
             subtitle: "Лучшие треки \(artist.name) и похожая музыка",
             seeds: ["artist:\(artist.id)"],
             fallbackStationId: "artist:\(artist.id)"
+        )
+    }
+
+    public static func forSavedWave(_ preset: SavedWavePreset) -> YMWaveContext {
+        var anchorSeeds: [String] = []
+        var seenAnchors = Set<String>()
+        for anchor in preset.anchorTracks {
+            let cleanId = anchor.id.components(separatedBy: ":").first ?? anchor.id
+            guard !cleanId.isEmpty else { continue }
+            let seed = "track:\(cleanId)"
+            if seenAnchors.insert(seed).inserted {
+                anchorSeeds.append(seed)
+                if anchorSeeds.count >= 5 { break }
+            }
+        }
+
+        let modifierSeeds: [String]
+        if !anchorSeeds.isEmpty {
+            modifierSeeds = preset.baseContextSeeds.filter { seed in
+                !seed.isEmpty && seed != "user:onyourwave" && !seed.hasPrefix("track:")
+            }
+        } else {
+            modifierSeeds = preset.baseContextSeeds.filter { !$0.isEmpty }
+        }
+
+        var combinedSeeds: [String] = []
+        var seenCombined = Set<String>()
+        for seed in anchorSeeds + modifierSeeds {
+            if seenCombined.insert(seed).inserted {
+                combinedSeeds.append(seed)
+                if combinedSeeds.count >= 5 { break }
+            }
+        }
+        if combinedSeeds.isEmpty {
+            combinedSeeds = ["user:onyourwave"]
+        }
+
+        let resolvedFallback: String
+        if let firstAnchorSeed = anchorSeeds.first {
+            resolvedFallback = firstAnchorSeed
+        } else if !preset.baseFallbackStationId.isEmpty {
+            resolvedFallback = preset.baseFallbackStationId
+        } else {
+            resolvedFallback = "user:onyourwave"
+        }
+
+        return YMWaveContext(
+            title: preset.name,
+            subtitle: preset.styleSummary,
+            seeds: combinedSeeds,
+            fallbackStationId: resolvedFallback,
+            fallbackTrackSeeds: anchorSeeds
         )
     }
 }

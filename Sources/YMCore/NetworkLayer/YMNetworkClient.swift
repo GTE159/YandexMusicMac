@@ -959,7 +959,16 @@ public actor YMNetworkClient {
 
     /// GET /tracks/{trackId}/supplement
     public func fetchTrackSupplement(trackId: String) async throws -> YMTrackSupplement {
-        try await request(endpoint: "/tracks/\(Self.escapePath(trackId))/supplement")
+        let numericId = OfflineTrackID.clean(trackId)
+        do {
+            return try await request(endpoint: "/tracks/\(Self.escapePath(trackId))/supplement")
+        } catch {
+            if let plain = await OfflineStorageStore.shared.loadLyrics(for: numericId)?.plain,
+               !plain.isEmpty {
+                return YMTrackSupplement(id: numericId, lyrics: YMLyrics(lyrics: plain, fullLyrics: plain))
+            }
+            throw error
+        }
     }
 
     /// Response envelope for GET /tracks/{trackId}/lyrics
@@ -990,13 +999,9 @@ public actor YMNetworkClient {
         }
     }
 
-    /// Fetches time-synchronized LRC lyrics for a track, signed with HMAC-SHA256.
-    /// Returns nil if synchronized lyrics are not available for this track.
-    public func fetchTrackLyricsLRC(trackId: String) async throws -> YMSyncedLyrics? {
-        let numericId = trackId.components(separatedBy: ":").first ?? trackId
-        if let cached = lyricsLRCCache[numericId] {
-            return cached
-        }
+    /// Downloads raw LRC text for a track using HMAC-SHA256 signed endpoint.
+    public func fetchTrackLyricsRawLRC(trackId: String) async throws -> String? {
+        let numericId = OfflineTrackID.clean(trackId)
         let timestamp = Int(Date().timeIntervalSince1970)
         let sign = YMAudioURLSigner.computeLyricsSign(trackId: numericId, timestamp: timestamp)
 
@@ -1038,17 +1043,40 @@ public actor YMNetworkClient {
             return nil
         }
 
+        return lrcContent
+    }
+
+    private func cacheSyncedLyrics(_ lrcContent: String, for numericId: String) -> YMSyncedLyrics? {
         let synced = YMSyncedLyrics.parse(lrcContent: lrcContent)
-        if !synced.isEmpty {
-            lyricsLRCCache[numericId] = synced
-            lyricsLRCCacheOrder.removeAll { $0 == numericId }
-            lyricsLRCCacheOrder.append(numericId)
-            while lyricsLRCCacheOrder.count > 12 {
-                let evicted = lyricsLRCCacheOrder.removeFirst()
-                lyricsLRCCache.removeValue(forKey: evicted)
-            }
-            return synced
+        guard !synced.isEmpty else { return nil }
+        lyricsLRCCache[numericId] = synced
+        lyricsLRCCacheOrder.removeAll { $0 == numericId }
+        lyricsLRCCacheOrder.append(numericId)
+        while lyricsLRCCacheOrder.count > 12 {
+            let evicted = lyricsLRCCacheOrder.removeFirst()
+            lyricsLRCCache.removeValue(forKey: evicted)
         }
+        return synced
+    }
+
+    /// Fetches time-synchronized LRC lyrics for a track, checking in-memory cache and encrypted offline lyrics first.
+    /// Returns nil if synchronized lyrics are not available for this track.
+    public func fetchTrackLyricsLRC(trackId: String) async throws -> YMSyncedLyrics? {
+        let numericId = OfflineTrackID.clean(trackId)
+        if let cached = lyricsLRCCache[numericId] {
+            return cached
+        }
+
+        if let offlineLRC = await OfflineStorageStore.shared.loadLyrics(for: numericId)?.lrc,
+           let parsed = cacheSyncedLyrics(offlineLRC, for: numericId) {
+            return parsed
+        }
+
+        if let rawLRC = try await fetchTrackLyricsRawLRC(trackId: numericId),
+           let parsed = cacheSyncedLyrics(rawLRC, for: numericId) {
+            return parsed
+        }
+
         return nil
     }
 

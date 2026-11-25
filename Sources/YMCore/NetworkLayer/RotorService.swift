@@ -24,6 +24,7 @@ public actor RotorService {
 
     private var activeContext: YMWaveContext = .myWaveDefault
     private var activeVibe: YMWaveVibePreset = .defaultWave
+    private var activeExcludedTrackIds: Set<String> = []
 
     public private(set) var diagnostics: YMRotorDiagnostics = YMRotorDiagnostics()
     public var preferredAPIMode: YMRotorAPIMode {
@@ -101,6 +102,7 @@ public actor RotorService {
         self.currentBatchId = nil
         self.activeV1StationId = nil
         self.isUsingV1Protocol = false
+        self.activeExcludedTrackIds.removeAll()
         self.seenTrackIds.removeAll()
         self.seenTrackIdList.removeAll()
         self.recentQueueIdentifiers.removeAll()
@@ -215,16 +217,25 @@ public actor RotorService {
     /// Resets duplicate tracking and session history.
     public func startWave(
         context: YMWaveContext = .myWaveDefault,
-        vibe: YMWaveVibePreset? = nil
+        vibe: YMWaveVibePreset? = nil,
+        excludedTrackIds: Set<String> = []
     ) async throws -> [YMTrack] {
         resetSession()
         let gen = sessionGeneration
         self.activeContext = context
         self.activeVibe = vibe ?? .defaultWave
+        self.activeExcludedTrackIds = Set(excludedTrackIds.map { $0.components(separatedBy: ":").first ?? $0 })
 
-        var effectiveSeeds = context.seeds
-        if let vibeSeed = activeVibe.seedParameter, !effectiveSeeds.contains(vibeSeed) {
+        var effectiveSeeds: [String] = []
+        var seenSeedSet = Set<String>()
+        for seed in context.seeds where !seed.isEmpty {
+            if seenSeedSet.insert(seed).inserted {
+                effectiveSeeds.append(seed)
+            }
+        }
+        if let vibeSeed = activeVibe.seedParameter, !seenSeedSet.contains(vibeSeed) {
             effectiveSeeds.append(vibeSeed)
+            seenSeedSet.insert(vibeSeed)
         }
 
         var lastFallbackReason: String? = nil
@@ -248,7 +259,8 @@ public actor RotorService {
 
                 recordTrackInsights(from: result.sequence)
                 let rawTracks = result.sequence.compactMap(\.track)
-                let (uniqueTracks, duplicatesFiltered) = filterUniqueTracksWithStats(rawTracks)
+                let (dedupedTracks, duplicatesFiltered) = filterUniqueTracksWithStats(rawTracks)
+                let uniqueTracks = filterExcludedTracks(dedupedTracks)
                 if !uniqueTracks.isEmpty {
                     self.currentSessionId = result.radioSessionId
                     self.currentBatchId = result.batchId
@@ -280,7 +292,7 @@ public actor RotorService {
             guard gen == sessionGeneration, !Task.isCancelled else { throw CancellationError() }
 
             // Level 2: Rotor Session v2 with Simplified Seeds
-            let simplifiedSeeds = buildSimplifiedSeeds(for: context, vibe: activeVibe)
+            let simplifiedSeeds = buildSimplifiedSeeds(for: context, vibe: activeVibe, excluding: effectiveSeeds)
             if !simplifiedSeeds.isEmpty && simplifiedSeeds != effectiveSeeds {
                 do {
                     let retryPayload = YMRotorSessionNewRequest(seeds: simplifiedSeeds)
@@ -298,7 +310,8 @@ public actor RotorService {
 
                     recordTrackInsights(from: result.sequence)
                     let rawTracks = result.sequence.compactMap(\.track)
-                    let (uniqueTracks, duplicatesFiltered) = filterUniqueTracksWithStats(rawTracks)
+                    let (dedupedTracks, duplicatesFiltered) = filterUniqueTracksWithStats(rawTracks)
+                    let uniqueTracks = filterExcludedTracks(dedupedTracks)
                     if !uniqueTracks.isEmpty {
                         self.currentSessionId = result.radioSessionId
                         self.currentBatchId = result.batchId
@@ -412,7 +425,8 @@ public actor RotorService {
         self.currentBatchId = validResponse.batchId
         recordTrackInsights(from: validResponse.sequence)
         let rawTracks = validResponse.sequence.compactMap(\.track)
-        let (uniqueTracks, duplicatesFiltered) = filterUniqueTracksWithStats(rawTracks)
+        let (dedupedTracks, duplicatesFiltered) = filterUniqueTracksWithStats(rawTracks)
+        let uniqueTracks = filterExcludedTracks(dedupedTracks)
 
         let protocolLabel = usedBaseWaveFallback
             ? "Base Wave Fallback (GET /rotor/station/user:onyourwave/tracks)"
@@ -489,7 +503,8 @@ public actor RotorService {
                     }
                     recordTrackInsights(from: recreatedResult.sequence)
                     let rawTracks = recreatedResult.sequence.compactMap(\.track)
-                    let (uniqueTracks, duplicatesFiltered) = filterUniqueTracksWithStats(rawTracks)
+                    let (dedupedTracks, duplicatesFiltered) = filterUniqueTracksWithStats(rawTracks)
+                    let uniqueTracks = filterExcludedTracks(dedupedTracks)
                     if !uniqueTracks.isEmpty {
                         updateDiagnostics(
                             activeProtocol: diagnostics.activeProtocol,
@@ -508,7 +523,8 @@ public actor RotorService {
                     }
                     recordTrackInsights(from: result.sequence)
                     let rawTracks = result.sequence.compactMap(\.track)
-                    let (uniqueTracks, duplicatesFiltered) = filterUniqueTracksWithStats(rawTracks)
+                    let (dedupedTracks, duplicatesFiltered) = filterUniqueTracksWithStats(rawTracks)
+                    let uniqueTracks = filterExcludedTracks(dedupedTracks)
                     if !uniqueTracks.isEmpty {
                         updateDiagnostics(
                             activeProtocol: diagnostics.activeLevel == 2
@@ -583,7 +599,8 @@ public actor RotorService {
         let sequence = response?.sequence ?? []
         recordTrackInsights(from: sequence)
         let rawTracks = sequence.compactMap(\.track)
-        let (uniqueTracks, duplicatesFiltered) = filterUniqueTracksWithStats(rawTracks)
+        let (dedupedTracks, duplicatesFiltered) = filterUniqueTracksWithStats(rawTracks)
+        let uniqueTracks = filterExcludedTracks(dedupedTracks)
 
         let finalStationId = activeV1StationId ?? (usedBaseWaveFallback ? "user:onyourwave" : stationId)
         updateDiagnostics(
@@ -629,16 +646,25 @@ public actor RotorService {
         )
     }
 
-    private func buildSimplifiedSeeds(for context: YMWaveContext, vibe: YMWaveVibePreset) -> [String] {
+    private func buildSimplifiedSeeds(
+        for context: YMWaveContext,
+        vibe: YMWaveVibePreset,
+        excluding effectiveSeeds: [String]
+    ) -> [String] {
         let vibeSeed = vibe.seedParameter
 
-        // 1. If playlist has fallback track seeds
+        // 1. Saved wave or playlist with fallback track seeds: try pure track seeds (+ optional vibe)
         if !context.fallbackTrackSeeds.isEmpty {
             var seeds = context.fallbackTrackSeeds
             if let vibeSeed {
                 seeds.append(vibeSeed)
             }
-            return seeds
+            if seeds != effectiveSeeds {
+                return seeds
+            }
+            if vibeSeed != nil {
+                return context.fallbackTrackSeeds
+            }
         }
 
         // 2. If station/artist has vibe seed (count > 1), try context.seeds without vibe
@@ -651,6 +677,15 @@ public actor RotorService {
         }
 
         return []
+    }
+
+    private func filterExcludedTracks(_ tracks: [YMTrack]) -> [YMTrack] {
+        guard !activeExcludedTrackIds.isEmpty, !tracks.isEmpty else { return tracks }
+        let filtered = tracks.filter { track in
+            let cleanId = track.id.components(separatedBy: ":").first ?? track.id
+            return !activeExcludedTrackIds.contains(cleanId) && !activeExcludedTrackIds.contains(track.id)
+        }
+        return filtered.isEmpty ? tracks : filtered
     }
 
     private func filterUniqueTracksWithStats(_ tracks: [YMTrack]) -> (unique: [YMTrack], duplicatesFiltered: Int) {

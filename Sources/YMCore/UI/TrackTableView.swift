@@ -374,8 +374,11 @@ private struct ModernTrackRow: View {
                 }
             }
 
-            // Like Heart Button
-            YMLikeHeartButton(track: track, buttonWidth: isMiniWidth ? 28 : 32)
+            // Offline Badge + Like Heart Button (both isolated subviews)
+            HStack(spacing: 4) {
+                YMTrackOfflineBadge(trackId: track.id)
+                YMLikeHeartButton(track: track, buttonWidth: isMiniWidth ? 28 : 32)
+            }
 
             // Duration
             Text(track.formattedDuration)
@@ -439,6 +442,7 @@ private struct ModernTrackRow: View {
                     onRemoveFromPlaylist()
                 }
             }
+            OfflineDownloadContextMenuItem(track: track)
             LikeContextMenuItem(track: track)
         }
     }

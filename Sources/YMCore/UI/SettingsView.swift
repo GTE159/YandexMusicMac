@@ -440,6 +440,11 @@ public struct SettingsView: View {
                     }
                 }
 
+                // Section 3.5: Offline Downloads & Encrypted Cache
+                settingsCard(title: "Оффлайн-режим и скачанное") {
+                    OfflineSettingsCard()
+                }
+
                 // Section 4: My Wave Algorithms & Rotor API Diagnostics (Bottom Card)
                 rotorDiagnosticsCard
             }
@@ -836,5 +841,185 @@ private struct YMPopupMenu<T: Hashable>: View {
         .menuStyle(.borderlessButton)
         .foregroundStyle(YMTheme.fg)
         .frame(width: width)
+    }
+}
+
+// MARK: - Isolated Offline Settings Card Content
+
+private struct OfflineSettingsCard: View {
+    @UIState private var qualitySettings = AudioQualitySettings.shared
+    @UIState private var offlineManager = OfflineDownloadManager.shared
+    @UIState private var isDeleteConfirmPresented = false
+    @UIState private var isClearedFeedback = false
+    @UIState private var feedbackTask: Task<Void, Never>? = nil
+
+    private let offlinePresets: [YMAudioQualityPreset] = [.lossless, .high320, .medium192, .standard128]
+    private let limitOptions: [(Int, String)] = [
+        (2, "2 ГБ"),
+        (5, "5 ГБ (По умолчанию)"),
+        (10, "10 ГБ"),
+        (20, "20 ГБ"),
+        (0, "Без лимита")
+    ]
+
+    private func limitTitle(_ gb: Int) -> String {
+        switch gb {
+        case 0: return "Без лимита"
+        case 5: return "5 ГБ (По умолчанию)"
+        default: return "\(gb) ГБ"
+        }
+    }
+
+    private func formatTrackCount(_ count: Int) -> String {
+        let mod10 = count % 10
+        let mod100 = count % 100
+        if mod100 >= 11 && mod100 <= 19 {
+            return "\(count) треков"
+        }
+        switch mod10 {
+        case 1: return "\(count) трек"
+        case 2, 3, 4: return "\(count) трека"
+        default: return "\(count) треков"
+        }
+    }
+
+    private func formattedByteCount(_ bytes: Int64) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        formatter.allowedUnits = [.useKB, .useMB, .useGB]
+        formatter.includesUnit = true
+        return formatter.string(fromByteCount: max(0, bytes))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Скачанные треки шифруются локальным ключом устройства (AES-256-GCM) и воспроизводятся без интернета.")
+                .font(.caption)
+                .foregroundStyle(YMTheme.fg60)
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    Text("Качество скачивания:")
+                        .font(.system(size: 13))
+                        .foregroundStyle(YMTheme.fg80)
+                        .fixedSize(horizontal: true, vertical: false)
+
+                    qualityMenu
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Качество скачивания:")
+                        .font(.system(size: 13))
+                        .foregroundStyle(YMTheme.fg80)
+
+                    qualityMenu
+                }
+            }
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    Text("Лимит места на диске:")
+                        .font(.system(size: 13))
+                        .foregroundStyle(YMTheme.fg80)
+                        .fixedSize(horizontal: true, vertical: false)
+
+                    limitMenu
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Лимит места на диске:")
+                        .font(.system(size: 13))
+                        .foregroundStyle(YMTheme.fg80)
+
+                    limitMenu
+                }
+            }
+
+            Divider()
+                .overlay(YMTheme.border)
+
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Занято в оффлайн-кэше: \(formattedByteCount(offlineManager.totalUsedBytes))")
+                        .font(.system(size: 13, weight: .medium).monospacedDigit())
+                        .foregroundStyle(YMTheme.fg)
+                    Text("Сохранено: \(formatTrackCount(offlineManager.downloadedRecords.count))")
+                        .font(.caption)
+                        .foregroundStyle(YMTheme.fg60)
+                }
+
+                Spacer()
+
+                Button {
+                    isDeleteConfirmPresented = true
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "trash")
+                            .font(.system(size: 11.5, weight: .semibold))
+                        Text("Удалить все скачанные треки")
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
+                    .foregroundStyle(Color.red.opacity(0.9))
+                }
+                .buttonStyle(YMGlassPillButtonStyle(primary: false, height: 32))
+                .disabled(offlineManager.downloadedRecords.isEmpty && offlineManager.activeDownloadsCount == 0)
+            }
+
+            if isClearedFeedback {
+                Text("✓ Все скачанные треки удалены.")
+                    .font(.caption)
+                    .foregroundColor(.green)
+            }
+        }
+        .alert("Удалить все скачанные треки?", isPresented: $isDeleteConfirmPresented) {
+            Button("Удалить", role: .destructive) {
+                Task {
+                    await offlineManager.deleteAllDownloads()
+                    isClearedFeedback = true
+                    feedbackTask?.cancel()
+                    feedbackTask = Task {
+                        try? await Task.sleep(nanoseconds: 3_500_000_000)
+                        guard !Task.isCancelled else { return }
+                        isClearedFeedback = false
+                    }
+                }
+            }
+            Button("Отмена", role: .cancel) {}
+        } message: {
+            Text("Зашифрованные аудиофайлы и сохранённые тексты песен будут удалены с этого Mac.")
+        }
+        .onDisappear {
+            feedbackTask?.cancel()
+            feedbackTask = nil
+        }
+        .task {
+            await offlineManager.loadIndexIfNeeded()
+        }
+    }
+
+    @ViewBuilder
+    private var qualityMenu: some View {
+        YMPopupMenu(
+            selectedTitle: qualitySettings.offlineQualityPreset.title,
+            options: offlinePresets.map { ($0, $0.title) },
+            selection: Binding(
+                get: { qualitySettings.offlineQualityPreset },
+                set: { qualitySettings.setOfflineQualityPreset($0) }
+            ),
+            width: 240
+        )
+    }
+
+    @ViewBuilder
+    private var limitMenu: some View {
+        YMPopupMenu(
+            selectedTitle: limitTitle(qualitySettings.offlineCacheLimitGB),
+            options: limitOptions,
+            selection: Binding(
+                get: { qualitySettings.offlineCacheLimitGB },
+                set: { qualitySettings.setOfflineCacheLimitGB($0) }
+            ),
+            width: 220
+        )
     }
 }

@@ -858,6 +858,9 @@ public final class LikesService {
                 try await removeLike(trackId: cleanId, albumId: resolvedAlbumId)
             } else {
                 try await addLike(trackId: cleanId, albumId: resolvedAlbumId)
+                if AudioPlayerEngine.shared.isWaveMode, let trackToNotify = knownTrack {
+                    AudioPlayerEngine.shared.onWaveTrackOutcome?(trackToNotify, .liked)
+                }
             }
         } catch {
             print("[LikesService] Failed to toggle like for \(trackId): \(error). Rolling back state...")

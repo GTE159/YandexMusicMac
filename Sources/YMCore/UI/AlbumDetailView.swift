@@ -94,13 +94,21 @@ public struct AlbumDetailView: View {
                                     .lineLimit(1)
 
                                 // Action Bar
-                                Button {
-                                    audioEngine.isWaveMode = false
-                                    audioEngine.assignQueue(cachedAllTracks, startingAt: 0)
-                                } label: {
-                                    Label(windowState.isMiniWidth ? "Слушать" : "Слушать альбом", systemImage: "play.fill")
+                                HStack(spacing: 10) {
+                                    Button {
+                                        audioEngine.isWaveMode = false
+                                        audioEngine.assignQueue(cachedAllTracks, startingAt: 0)
+                                    } label: {
+                                        Label(windowState.isMiniWidth ? "Слушать" : "Слушать альбом", systemImage: "play.fill")
+                                    }
+                                    .buttonStyle(YMGlassPillButtonStyle(primary: true, height: windowState.isMiniWidth ? 30 : 34))
+
+                                    BatchDownloadButton(
+                                        tracks: cachedAllTracks,
+                                        height: windowState.isMiniWidth ? 30 : 34,
+                                        compact: windowState.isMiniWidth
+                                    )
                                 }
-                                .buttonStyle(YMGlassPillButtonStyle(primary: true, height: windowState.isMiniWidth ? 30 : 34))
                                 .padding(.top, 4)
                             }
 

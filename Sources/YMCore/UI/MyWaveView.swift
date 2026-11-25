@@ -18,6 +18,15 @@ public final class WaveSessionController {
     public var errorMessage: String? = nil
     public var toastMessage: String? = nil
 
+    public let tasteTracker = WaveSessionTasteTracker()
+    public var activeSavedWaveId: UUID? = nil
+    public var activeSavedWave: SavedWavePreset? {
+        activeSavedWaveId.flatMap { SavedWavePresetStore.shared.preset(withId: $0) }
+    }
+    public var hasPendingSavedWaveChanges: Bool {
+        activeSavedWaveId != nil && tasteTracker.hasPendingStyleDrift
+    }
+
     private var toastDismissTask: Task<Void, Never>? = nil
     private var waveStartTask: Task<Void, Never>? = nil
     private var lastEmptyMoreTracksAt: Date? = nil
@@ -44,8 +53,18 @@ public final class WaveSessionController {
 
         engine.onStartCustomWaveRequested = { [weak self] context, vibe in
             Task { @MainActor in
-                self?.startWave(context: context, vibe: vibe ?? .defaultWave)
+                guard let self else { return }
+                let shouldPreserveSaved = (self.activeSavedWaveId != nil && context == AudioPlayerEngine.shared.activeWaveContext)
+                self.startWave(
+                    context: context,
+                    vibe: vibe ?? .defaultWave,
+                    preserveSavedWaveId: shouldPreserveSaved
+                )
             }
+        }
+
+        engine.onWaveTrackOutcome = { [weak self] track, outcome in
+            self?.tasteTracker.recordOutcome(outcome, for: track)
         }
     }
 
@@ -57,7 +76,38 @@ public final class WaveSessionController {
         self.isLoadingDashboard = false
     }
 
-    public func startWave(context: YMWaveContext, vibe: YMWaveVibePreset) {
+    public func startSavedWave(_ preset: SavedWavePreset) {
+        let context = YMWaveContext.forSavedWave(preset)
+        activeSavedWaveId = preset.id
+        tasteTracker.beginSessionFromPreset(preset, context: context)
+        startWaveInternal(
+            context: context,
+            vibe: preset.vibe,
+            excludedTrackIds: Set(preset.excludedTrackIds)
+        )
+    }
+
+    public func startWave(
+        context: YMWaveContext,
+        vibe: YMWaveVibePreset,
+        preserveSavedWaveId: Bool = false
+    ) {
+        if preserveSavedWaveId && activeSavedWaveId != nil {
+            tasteTracker.recordVibeChange(vibe)
+            let excluded = Set(activeSavedWave?.excludedTrackIds ?? tasteTracker.currentExcludedTrackIds)
+            startWaveInternal(context: context, vibe: vibe, excludedTrackIds: excluded)
+        } else {
+            activeSavedWaveId = nil
+            tasteTracker.beginFreshSession(context: context, vibe: vibe)
+            startWaveInternal(context: context, vibe: vibe, excludedTrackIds: [])
+        }
+    }
+
+    private func startWaveInternal(
+        context: YMWaveContext,
+        vibe: YMWaveVibePreset,
+        excludedTrackIds: Set<String>
+    ) {
         waveStartTask?.cancel()
         isLoadingWave = true
         errorMessage = nil
@@ -65,7 +115,11 @@ public final class WaveSessionController {
 
         waveStartTask = Task {
             do {
-                let initialTracks = try await RotorService.shared.startWave(context: context, vibe: vibe)
+                let initialTracks = try await RotorService.shared.startWave(
+                    context: context,
+                    vibe: vibe,
+                    excludedTrackIds: excludedTrackIds
+                )
                 guard !Task.isCancelled else { return }
                 self.waveTracks = initialTracks
                 self.isLoadingWave = false
@@ -80,6 +134,33 @@ public final class WaveSessionController {
                 self.errorMessage = error.localizedDescription
             }
         }
+    }
+
+    public func buildCurrentSnapshotCandidate() -> WaveSnapshotCandidate {
+        let engine = AudioPlayerEngine.shared
+        return tasteTracker.buildCandidateSnapshot(
+            currentTrack: engine.currentTrack,
+            queue: engine.queue,
+            currentIndex: engine.currentIndex,
+            context: engine.activeWaveContext,
+            vibe: engine.activeWaveVibe
+        )
+    }
+
+    public func markSavedWaveSynced(_ preset: SavedWavePreset) {
+        let context = YMWaveContext.forSavedWave(preset)
+        activeSavedWaveId = preset.id
+        let engine = AudioPlayerEngine.shared
+        if engine.isWaveMode {
+            engine.activeWaveContext = context
+            engine.activeWaveVibe = preset.vibe
+        }
+        tasteTracker.beginSessionFromPreset(preset, context: context)
+    }
+
+    public func clearActiveSavedWave() {
+        activeSavedWaveId = nil
+        tasteTracker.detachBaselinePreset()
     }
 
     public func loadMoreTracks() async {
@@ -146,9 +227,12 @@ public struct MyWaveView: View {
     @UIState private var coordinator = NavigationCoordinator.shared
     @UIState private var authService = AuthService.shared
     @UIState private var rotorDiagnosticsStore = RotorDiagnosticsStore.shared
+    @UIState private var savedWavesStore = SavedWavePresetStore.shared
 
     @UIState private var selectedFilter: YMWaveCategoryFilter = .forYou
     @UIState private var isCatalogSheetPresented = false
+    @UIState private var activeSaveSheetMode: SaveWaveSheetMode? = nil
+    @UIState private var presetPendingDelete: SavedWavePreset? = nil
     @UIState private var isScrolled: Bool = false
     @Namespace private var filterTabNamespace
 
@@ -221,10 +305,15 @@ public struct MyWaveView: View {
                     .padding(.horizontal, windowState.isMiniWidth ? 16 : 24)
                 }
 
-                // 2. Unified Adaptive Block: "Поток и настроение"
+                // 2. Saved Waves Snapshots (renders only when non-empty)
+                if !savedWavesStore.presets.isEmpty {
+                    savedWavesSection
+                }
+
+                // 3. Unified Adaptive Block: "Поток и настроение"
                 unifiedWaveHubSection
 
-                // 3. Upcoming Queue: "Далее в волне"
+                // 4. Upcoming Queue: "Далее в волне"
                 upcomingQueueSection
             }
             .padding(.bottom, 80)
@@ -254,15 +343,64 @@ public struct MyWaveView: View {
                 activeContextSeeds: audioEngine.activeWaveContext.seeds,
                 onSelectStation: { station in
                     isCatalogSheetPresented = false
-                    waveController.startWave(context: station.toWaveContext(), vibe: audioEngine.activeWaveVibe)
+                    waveController.startWave(
+                        context: station.toWaveContext(),
+                        vibe: audioEngine.activeWaveVibe,
+                        preserveSavedWaveId: false
+                    )
                     waveController.showToast("Запущена волна «\(station.title)»")
                 }
             )
         }
+        .sheet(item: $activeSaveSheetMode) { mode in
+            SaveWavePresetSheet(
+                mode: mode,
+                onDismiss: {
+                    activeSaveSheetMode = nil
+                },
+                onCompleted: { result in
+                    activeSaveSheetMode = nil
+                    switch result {
+                    case .created(let created):
+                        waveController.markSavedWaveSynced(created)
+                        waveController.showToast("Волна «\(created.name)» сохранена")
+                    case .overwritten(let updated):
+                        waveController.markSavedWaveSynced(updated)
+                        waveController.showToast("Стиль волны «\(updated.name)» обновлён")
+                    case .metadataUpdated(let updated):
+                        waveController.showToast("Волна «\(updated.name)» обновлена")
+                    }
+                }
+            )
+        }
+        .alert(
+            "Удалить сохранённую волну?",
+            isPresented: Binding(
+                get: { presetPendingDelete != nil },
+                set: { if !$0 { presetPendingDelete = nil } }
+            ),
+            presenting: presetPendingDelete
+        ) { target in
+            Button("Удалить", role: .destructive) {
+                if waveController.activeSavedWaveId == target.id {
+                    waveController.clearActiveSavedWave()
+                }
+                savedWavesStore.deletePreset(id: target.id)
+                waveController.showToast("Волна «\(target.name)» удалена")
+                presetPendingDelete = nil
+            }
+            Button("Отмена", role: .cancel) {
+                presetPendingDelete = nil
+            }
+        } message: { target in
+            Text("Снимок волны «\(target.name)» будет удалён. Вы всегда сможете сохранить новое направление заново.")
+        }
         .task {
+            savedWavesStore.loadIfNeeded()
             await waveController.loadDashboardStationsIfNeeded()
         }
         .onAppear {
+            savedWavesStore.loadIfNeeded()
             if audioEngine.isWaveMode && !audioEngine.queue.isEmpty {
                 waveController.waveTracks = audioEngine.queue
             }
@@ -334,8 +472,15 @@ public struct MyWaveView: View {
         .ymAmbientCoverGlow(coverUri: activeTrack?.effectiveCoverUri, opacity: 0.28)
     }
 
+    private var canSaveCurrentWave: Bool {
+        audioEngine.isWaveMode && (audioEngine.currentTrack != nil || !displayedWaveTracks.isEmpty)
+    }
+
     private var hasActiveWaveFilters: Bool {
-        audioEngine.activeWaveContext != .myWaveDefault || audioEngine.activeWaveVibe != .defaultWave
+        canSaveCurrentWave
+            || waveController.activeSavedWave != nil
+            || audioEngine.activeWaveContext != .myWaveDefault
+            || audioEngine.activeWaveVibe != .defaultWave
     }
 
     @ViewBuilder
@@ -378,7 +523,16 @@ public struct MyWaveView: View {
     @ViewBuilder
     private var activeFilterChipsRow: some View {
         HStack(spacing: 8) {
-            if audioEngine.activeWaveContext != .myWaveDefault {
+            if let activePreset = waveController.activeSavedWave {
+                removableFilterChip(title: activePreset.name, icon: activePreset.icon.rawValue) {
+                    waveController.startWave(
+                        context: .myWaveDefault,
+                        vibe: .defaultWave,
+                        preserveSavedWaveId: false
+                    )
+                    waveController.showToast("Возврат к базовой «Моей волне»")
+                }
+            } else if audioEngine.activeWaveContext != .myWaveDefault {
                 removableFilterChip(title: audioEngine.activeWaveContext.title, icon: "waveform") {
                     waveController.startWave(context: .myWaveDefault, vibe: audioEngine.activeWaveVibe)
                     waveController.showToast("Возврат к базовой «Моей волне»")
@@ -387,10 +541,96 @@ public struct MyWaveView: View {
 
             if audioEngine.activeWaveVibe != .defaultWave {
                 removableFilterChip(title: audioEngine.activeWaveVibe.title, icon: audioEngine.activeWaveVibe.iconName) {
-                    waveController.startWave(context: audioEngine.activeWaveContext, vibe: .defaultWave)
+                    let preserve = (waveController.activeSavedWaveId != nil)
+                    waveController.startWave(
+                        context: audioEngine.activeWaveContext,
+                        vibe: .defaultWave,
+                        preserveSavedWaveId: preserve
+                    )
                     waveController.showToast("Сброс характера звучания")
                 }
             }
+
+            if canSaveCurrentWave {
+                waveSnapshotActionButton
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var waveSnapshotActionButton: some View {
+        if let activePreset = waveController.activeSavedWave {
+            if waveController.hasPendingSavedWaveChanges {
+                Button {
+                    let candidate = waveController.buildCurrentSnapshotCandidate()
+                    activeSaveSheetMode = .updateOrFork(existing: activePreset, candidate: candidate)
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .font(.system(size: 10.5, weight: .bold))
+                        Text("Обновить «\(activePreset.name)»")
+                            .font(.system(size: 11.5, weight: .semibold))
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(Color.black)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(YMTheme.accentFill)
+                    )
+                }
+                .buttonStyle(.plain)
+                .help("Перезаписать стиль сохранённой волны текущим направлением или сохранить как новую")
+            } else {
+                Button {
+                    let candidate = waveController.buildCurrentSnapshotCandidate()
+                    activeSaveSheetMode = .updateOrFork(existing: activePreset, candidate: candidate)
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "slider.horizontal.3")
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .foregroundStyle(YMTheme.accent)
+                        Text("Настроить волну")
+                            .font(.system(size: 11.5, weight: .semibold))
+                            .foregroundStyle(YMTheme.fg80)
+                            .lineLimit(1)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(YMTheme.surfaceComponent)
+                            .overlay(Capsule(style: .continuous).strokeBorder(YMTheme.border, lineWidth: 1))
+                    )
+                }
+                .buttonStyle(.plain)
+                .help("Переименовать, просмотреть якорные треки или обновить сохранённую волну")
+            }
+        } else {
+            Button {
+                let candidate = waveController.buildCurrentSnapshotCandidate()
+                activeSaveSheetMode = .createNew(candidate: candidate)
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "bookmark")
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(YMTheme.accent)
+                    Text("Сохранить волну")
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(YMTheme.fg)
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(YMTheme.surfaceComponent)
+                        .overlay(Capsule(style: .continuous).strokeBorder(YMTheme.border, lineWidth: 1))
+                )
+            }
+            .buttonStyle(.plain)
+            .help("Сохранить текущее направление волны под собственным названием")
         }
     }
 
@@ -524,7 +764,70 @@ public struct MyWaveView: View {
         .padding(.horizontal, windowState.isMiniWidth ? 16 : 24)
     }
 
-    // MARK: - 2. Unified Adaptive Block ("Поток и настроение")
+    // MARK: - 2. Saved Waves Section ("Сохранённые волны")
+
+    @ViewBuilder
+    private var savedWavesSection: some View {
+        let horizontalPad: CGFloat = windowState.isMiniWidth ? 16 : 24
+        let columns = [
+            GridItem(
+                .adaptive(
+                    minimum: windowState.isMiniWidth ? 145 : 170,
+                    maximum: 230
+                ),
+                spacing: 10
+            )
+        ]
+
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Text("Сохранённые волны")
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle(YMTheme.fg)
+
+                Text("\(savedWavesStore.presets.count)")
+                    .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(YMTheme.fg60)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(YMTheme.surfaceComponent))
+
+                Spacer()
+            }
+            .padding(.horizontal, horizontalPad)
+
+            LazyVGrid(columns: columns, spacing: 10) {
+                ForEach(savedWavesStore.presets) { preset in
+                    let isActive = waveController.activeSavedWaveId == preset.id
+                    let accent = Self.color(fromHex: preset.accentHex) ?? YMTheme.accent
+                    SavedWaveCard(
+                        preset: preset,
+                        isActive: isActive,
+                        hasDrift: isActive && waveController.hasPendingSavedWaveChanges,
+                        canOverwriteWithCurrentWave: canSaveCurrentWave,
+                        accentColor: accent,
+                        onLaunch: {
+                            waveController.startSavedWave(preset)
+                            waveController.showToast("Запущена волна «\(preset.name)»")
+                        },
+                        onOverwrite: {
+                            let candidate = waveController.buildCurrentSnapshotCandidate()
+                            activeSaveSheetMode = .updateOrFork(existing: preset, candidate: candidate)
+                        },
+                        onEditMetadata: {
+                            activeSaveSheetMode = .editMetadata(existing: preset)
+                        },
+                        onDelete: {
+                            presetPendingDelete = preset
+                        }
+                    )
+                }
+            }
+            .padding(.horizontal, horizontalPad)
+        }
+    }
+
+    // MARK: - 3. Unified Adaptive Block ("Поток и настроение")
 
     @ViewBuilder
     private var unifiedWaveHubSection: some View {
@@ -680,7 +983,8 @@ public struct MyWaveView: View {
         case .vibe(let preset):
             return audioEngine.activeWaveVibe == preset
         case .station(let station):
-            return audioEngine.isWaveMode
+            return waveController.activeSavedWaveId == nil
+                && audioEngine.isWaveMode
                 && audioEngine.activeWaveContext.seeds.contains(station.id)
         }
     }
@@ -688,12 +992,20 @@ public struct MyWaveView: View {
     private func handleUnifiedItemTap(_ item: YMUnifiedWaveItem) {
         switch item {
         case .baseWave:
-            waveController.startWave(context: .myWaveDefault, vibe: .defaultWave)
+            waveController.startWave(
+                context: .myWaveDefault,
+                vibe: .defaultWave,
+                preserveSavedWaveId: false
+            )
             waveController.showToast("Запущена базовая «Моя волна»")
 
         case .station(let station):
             let context = station.toWaveContext()
-            waveController.startWave(context: context, vibe: audioEngine.activeWaveVibe)
+            waveController.startWave(
+                context: context,
+                vibe: audioEngine.activeWaveVibe,
+                preserveSavedWaveId: false
+            )
             if audioEngine.activeWaveVibe != .defaultWave {
                 waveController.showToast("Волна «\(station.title)» • \(audioEngine.activeWaveVibe.title)")
             } else {
@@ -702,7 +1014,12 @@ public struct MyWaveView: View {
 
         case .vibe(let preset):
             let nextVibe: YMWaveVibePreset = (audioEngine.activeWaveVibe == preset) ? .defaultWave : preset
-            waveController.startWave(context: audioEngine.activeWaveContext, vibe: nextVibe)
+            let preserveSaved = (waveController.activeSavedWaveId != nil)
+            waveController.startWave(
+                context: audioEngine.activeWaveContext,
+                vibe: nextVibe,
+                preserveSavedWaveId: preserveSaved
+            )
             if nextVibe == .defaultWave {
                 waveController.showToast("Характер звучания сброшен на «По умолчанию»")
             } else if audioEngine.activeWaveContext != .myWaveDefault {
@@ -876,6 +1193,139 @@ private struct UnifiedWaveCardButtonStyle: ButtonStyle {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.985 : 1.0)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+private struct SavedWaveCard: View {
+    let preset: SavedWavePreset
+    let isActive: Bool
+    let hasDrift: Bool
+    let canOverwriteWithCurrentWave: Bool
+    let accentColor: Color
+    let onLaunch: () -> Void
+    let onOverwrite: () -> Void
+    let onEditMetadata: () -> Void
+    let onDelete: () -> Void
+
+    @UIState private var isHovered = false
+
+    var body: some View {
+        Button(action: onLaunch) {
+            HStack(spacing: 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(accentColor.opacity(isActive ? 0.28 : (YMTheme.isLight ? 0.16 : 0.22)))
+                        .frame(width: 34, height: 34)
+
+                    if let coverUri = preset.primaryCoverUri, !coverUri.isEmpty {
+                        CachedCoverImage(
+                            coverUri: coverUri,
+                            size: .small,
+                            displaySize: 34,
+                            cornerRadius: 8
+                        )
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color.black.opacity(0.42))
+                            .frame(width: 34, height: 34)
+                        Image(systemName: preset.icon.rawValue)
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(.white)
+                    } else {
+                        Image(systemName: preset.icon.rawValue)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(isActive ? YMTheme.accent : accentColor)
+                    }
+                }
+                .frame(width: 34, height: 34)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
+                )
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(preset.name)
+                        .font(.system(size: 12.5, weight: isActive ? .bold : .semibold))
+                        .foregroundStyle(isActive ? YMTheme.accent : YMTheme.fg)
+                        .lineLimit(1)
+
+                    Text(preset.styleSummary)
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(YMTheme.fg40)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 4)
+
+                if isActive {
+                    HStack(spacing: 4) {
+                        if hasDrift {
+                            Text("изм.")
+                                .font(.system(size: 9.5, weight: .bold))
+                                .foregroundStyle(YMTheme.accent)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1.5)
+                                .background(Capsule().fill(YMTheme.accent.opacity(0.16)))
+                        }
+                        Circle()
+                            .fill(YMTheme.accent)
+                            .frame(width: 6, height: 6)
+                    }
+                    .help(hasDrift ? "Стиль сессии изменился — нажмите «Обновить»" : "Волна активна")
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(YMTheme.surface)
+                    .overlay(
+                        LinearGradient(
+                            colors: [
+                                accentColor.opacity(isActive ? 0.18 : (isHovered ? 0.13 : (YMTheme.isLight ? 0.07 : 0.09))),
+                                Color.clear
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .overlay(
+                        Color.white.opacity(isHovered ? (YMTheme.isLight ? 0.20 : 0.035) : 0)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(
+                        isActive ? YMTheme.accent.opacity(0.60) : (isHovered ? YMTheme.borderHover : YMTheme.border),
+                        lineWidth: 1
+                    )
+            )
+            .animation(.easeOut(duration: 0.14), value: isHovered)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(UnifiedWaveCardButtonStyle())
+        .onHover { inside in
+            if inside && TrackHoverManager.shared.isScrollSuppressed { return }
+            if isHovered != inside { isHovered = inside }
+        }
+        .onDisappear {
+            if isHovered { isHovered = false }
+        }
+        .contextMenu {
+            Button("Запустить волну", action: onLaunch)
+            if canOverwriteWithCurrentWave {
+                Button("Перезаписать текущим стилем...", action: onOverwrite)
+            }
+            Button("Изменить название и иконку...", action: onEditMetadata)
+            Divider()
+            Button("Удалить волну", role: .destructive, action: onDelete)
+        }
+        .help(
+            hasDrift
+                ? "\(preset.styleSummary) • Есть несохранённые изменения стиля"
+                : preset.styleSummary
+        )
     }
 }
 

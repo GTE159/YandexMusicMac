@@ -74,10 +74,6 @@ public final class ImagePipeline {
             return nil
         }
 
-        guard let url = YMCoverURLBuilder.buildURL(from: coverUri, size: size) else {
-            return nil
-        }
-
         let maxPixelSize: CGFloat
         switch size {
         case .small: maxPixelSize = 100
@@ -87,6 +83,14 @@ public final class ImagePipeline {
         }
 
         let task = Task.detached(priority: .userInitiated) { () -> (CGImage, Int)? in
+            if let offlineData = await OfflineStorageStore.shared.localCoverData(for: coverUri),
+               !Task.isCancelled,
+               let localResult = ImageDownsampler.downsampleCGImageWithCost(data: offlineData, maxPixelSize: maxPixelSize) {
+                return localResult
+            }
+            guard !Task.isCancelled, let url = YMCoverURLBuilder.buildURL(from: coverUri, size: size) else {
+                return nil
+            }
             guard let result = await ImageDownsampler.fetchAndDownsampleCGImageWithCost(from: url, maxPixelSize: maxPixelSize),
                   !Task.isCancelled else {
                 return nil

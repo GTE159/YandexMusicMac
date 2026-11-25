@@ -5,6 +5,7 @@ public enum SidebarSection: String, CaseIterable, Identifiable {
     case chart = "Чарт"
     case favorites = "Мне нравится"
     case playlists = "Плейлисты"
+    case downloads = "Скачанное"
     case search = "Поиск"
     case settings = "Настройки"
 
@@ -16,6 +17,7 @@ public enum SidebarSection: String, CaseIterable, Identifiable {
         case .chart: return "chart.line.uptrend.xyaxis"
         case .favorites: return "heart.fill"
         case .playlists: return "music.note.list"
+        case .downloads: return "arrow.down.circle.fill"
         case .search: return "magnifyingglass"
         case .settings: return "gearshape"
         }
@@ -76,6 +78,7 @@ public struct MainSplitView: View {
             setupKeyboardMonitor()
             Task {
                 await playlistsService.ensureLoaded()
+                await OfflineDownloadManager.shared.loadIndexIfNeeded()
             }
         }
         .onDisappear {
@@ -123,6 +126,8 @@ public struct MainSplitView: View {
                     sidebarButton(section: .favorites)
 
                     sidebarButton(section: .playlists)
+
+                    sidebarButton(section: .downloads)
                 }
 
                 // Section 2: Обзор и настройки
@@ -286,6 +291,8 @@ public struct MainSplitView: View {
 
                 if section == .favorites {
                     SidebarFavoritesBadge()
+                } else if section == .downloads {
+                    SidebarDownloadsBadge()
                 } else if let badge = badge {
                     Text(badge)
                         .font(.system(size: 10.5, weight: .semibold).monospacedDigit())
@@ -341,6 +348,8 @@ public struct MainSplitView: View {
                                 FavoritesListView()
                             case .playlists:
                                 PlaylistsView()
+                            case .downloads:
+                                DownloadsView()
                             case .search:
                                 SearchView()
                             case .settings:
@@ -568,6 +577,40 @@ private struct SidebarFavoritesBadge: View {
             return String(format: "%d\u{00A0}%03d", count / 1000, count % 1000)
         } else {
             return "\(count)"
+        }
+    }
+}
+
+// MARK: - Isolated Sidebar Downloads Badge
+
+private struct SidebarDownloadsBadge: View {
+    @UIState private var offlineManager = OfflineDownloadManager.shared
+
+    var body: some View {
+        let count = offlineManager.downloadedTrackIds.count
+        let active = offlineManager.activeDownloadsCount
+        if active > 0 || count > 0 {
+            HStack(spacing: 4) {
+                if active > 0 {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .scaleEffect(0.7)
+                        .frame(width: 10, height: 10)
+                }
+
+                Text("\(active > 0 && count == 0 ? active : count)")
+                    .font(.system(size: 10.5, weight: .semibold).monospacedDigit())
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(
+                Capsule()
+                    .fill(active > 0 ? YMTheme.accent.opacity(0.18) : YMTheme.surfaceComponent)
+            )
+            .foregroundStyle(active > 0 ? YMTheme.accent : YMTheme.fg60)
+            .layoutPriority(2)
         }
     }
 }
